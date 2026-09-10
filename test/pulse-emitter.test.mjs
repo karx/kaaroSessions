@@ -360,7 +360,12 @@ test('sqlite read_mode — a dispatch failure on one row does not poison rows af
         assert.ok(toolCalls.some(e => e.data.where.includes('file3.js')),
           'row AFTER the failing one must not be silently lost — this is the regression');
         const dispatchErrors = errors.filter(args => args.some(a => String(a).includes('[opencode] sqlite live-pulse dispatch failed')));
-        assert.equal(dispatchErrors.length, 1, 'the failure must be logged, not swallowed');
+        // >= 1, not exactly 1: a row whose dispatch throws produced zero
+        // pulses, so it also lands in the pending-recheck list and gets
+        // retried later (including immediately, in this same tick's recheck
+        // sweep) — logged again each time it's retried. That's a feature
+        // (transient failures self-heal), not a regression.
+        assert.ok(dispatchErrors.length >= 1, 'the failure must be logged, not swallowed');
       } finally {
         emitter.closeSqliteReaders();
       }
@@ -401,6 +406,53 @@ test('sqlite read_mode — a part updated pending → completed pulses exactly o
     emitter.tailAndPulse(dbPath, ctx);
     assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1,
       'the completed transition must pulse exactly once');
+    emitter.closeSqliteReaders();
+  });
+});
+
+// Regression test for a bug found live-verifying the HWM cursor against the
+// real server: `time_updated` is an app-supplied timestamp, not guaranteed
+// monotonic with SQLite's `rowid` insertion order. Under concurrent/parallel
+// tool calls, a row can land with an EARLIER time_updated than one already
+// consumed (clock jitter, out-of-order commit) — the (time_updated, rowid)
+// composite cursor's `WHERE time_updated > cursor.time OR (=  AND rowid >
+// cursor.rowid)` then permanently excludes it, since neither disjunct is
+// true. Measured live: 13 real tool-completions in a clean, settled window
+// (no restart), only 9 reached active-state. Fixed by making the cursor
+// rowid-only (SQLite's actual monotonic guarantee) for discovering new rows.
+test('sqlite read_mode — a new row with an out-of-order (earlier) time_updated than an already-seen row still pulses', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_skew', 'D:\\\\src\\\\skewproj', 'p', 10);");
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: 'ses_skew', slug: 'skew',
+      project_id: null, project_label: null, read_mode: 'sqlite' };
+    emitter.tailAndPulse(dbPath, ctx); // bootstrap
+
+    const db2 = new DatabaseSync(dbPath);
+    // row A: later timestamp, inserted (thus rowid-ordered) first.
+    insertPart(db2, { id: 'prt_a', messageId: 'm', sessionId: 'ses_skew', t: 2000, input: { filePath: 'a.js' } });
+    db2.close();
+    emitter.tailAndPulse(dbPath, ctx);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1, 'row A pulses');
+
+    const db3 = new DatabaseSync(dbPath);
+    // row B: EARLIER timestamp than row A (clock skew / concurrent commit),
+    // but a strictly higher rowid (inserted after, in real DB order).
+    insertPart(db3, { id: 'prt_b', messageId: 'm', sessionId: 'ses_skew', t: 1500, input: { filePath: 'b.js' } });
+    db3.close();
+    emitter.tailAndPulse(dbPath, ctx);
+    const toolCalls = hub.events.filter(e => e.event === 'tool_call');
+    assert.equal(toolCalls.length, 2, 'row B must still pulse despite its earlier time_updated — this is the regression');
+    assert.ok(toolCalls.some(e => e.data.where.replace(/\\/g, '/').includes('b.js')));
     emitter.closeSqliteReaders();
   });
 });

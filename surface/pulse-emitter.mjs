@@ -41,17 +41,23 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     nowTimer.unref?.();
   }
 
+  // @returns {number} pulses actually emitted — the sqlite path uses this to
+  //   tell "dispatched, produced nothing yet (still pending)" from "dispatched
+  //   and pulsed", to decide whether a part needs rechecking later.
   function emitPulses(records, ctx) {
     const harness = getHarness(ctx.harness);
-    if (!harness) return;
+    if (!harness) return 0;
     const nrs   = harness.adapter(records);
     const nowMs = Date.now();
+    let pulseCount = 0;
     for (const pulse of normRecordsToPulses(nrs, ctx, harness.capabilities)) {
+      pulseCount++;
       applyPulse(activeState, pulse, nowMs);
       kindMap?.applyPulse(pulse);
       hub.notify(pulse.event, JSON.stringify(pulse.data));
     }
     scheduleNowBroadcast();
+    return pulseCount;
   }
 
   // Whole-file JSON harnesses (opencode): each watched file is one pretty-printed
@@ -87,17 +93,38 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
   }
 
   // SQLite database harnesses (opencode >= 1.18.x): a persistent reader per
-  // dbPath, cursoring the `part`/`message` tables by a High-Water Mark tuple
-  // (time_updated, rowid) — see RFC-opencode-cdc-tracking.md. This replaces
-  // an earlier `ORDER BY rowid DESC LIMIT 5` scan, which silently and
-  // permanently dropped anything beyond the 5 most recent rows under a burst
-  // (routine for parallel/rapid tool calls) and never queried `message` at
-  // all (so opencode's SQLite path emitted zero live `tokens`/`human_turn`
-  // pulses). The HWM cursor guarantees every row is delivered exactly once,
-  // in commit order, with no arbitrary window; bootstrapping it to the
-  // tables' current max on first touch means whatever was already on disk
-  // at that point (the offline scan's job) doesn't replay as a live pulse.
+  // dbPath, cursoring the `part`/`message` tables — see
+  // RFC-opencode-cdc-tracking.md. Two bugs fixed here, both found live:
+  //
+  // 1. An earlier `ORDER BY rowid DESC LIMIT 5` scan silently and permanently
+  //    dropped anything beyond the 5 most recent rows under a burst (routine
+  //    for parallel/rapid tool calls), and never queried `message` at all
+  //    (so the sqlite path emitted zero live `tokens`/`human_turn` pulses).
+  //
+  // 2. The fix for #1 cursored on a (time_updated, rowid) composite tuple.
+  //    time_updated is an app-supplied timestamp, NOT guaranteed monotonic
+  //    with SQLite's actual insertion order — under concurrent/parallel tool
+  //    calls a row can land with an EARLIER time_updated than one already
+  //    consumed (clock jitter, out-of-order commit), and the composite
+  //    cursor's `WHERE time_updated > cursor.time OR (= AND rowid >
+  //    cursor.rowid)` then excludes it forever, since neither disjunct is
+  //    true. Measured live: 13 real tool-completions in a clean, settled
+  //    window, only 9 reached active-state.
+  //
+  // Fixed by cursoring on `rowid` alone — SQLite's actual monotonic
+  // guarantee, immune to timestamp ordering. That alone can't detect an
+  // in-place UPDATE to a row already passed (rowid is stable across UPDATE),
+  // which matters for the tool part pending→running→completed state machine
+  // (only terminal states produce a pulse — see hooks/adapters/opencode.mjs).
+  // So: any part dispatched with zero resulting pulses (still transient) is
+  // remembered in a small bounded map and rechecked by id every tick until
+  // it either pulses or the map's capacity evicts it (oldest first).
+  //
+  // Bootstrapping both cursors to each table's current max rowid on first
+  // touch means whatever was already on disk at that point (the offline
+  // scan's job) doesn't replay as a live pulse.
   const sqliteReaders = new Map(); // dbPath → reader state
+  const PENDING_PARTS_CAP = 500;
 
   function dbPathFromWatchedFile(filePath) {
     return filePath.endsWith('.db') ? filePath : filePath.replace(/\.db-[^/\\]+$/, '.db');
@@ -110,51 +137,39 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
       const db = new DatabaseSync(dbPath, { readOnly: true });
       db.exec('PRAGMA query_only = ON;');
       db.exec('PRAGMA busy_timeout = 5000;'); // yield through opencode's own WAL checkpoints
-      const maxPart = db.prepare('SELECT COALESCE(MAX(time_updated),0) t, COALESCE(MAX(rowid),0) r FROM part').get();
-      const maxMsg  = db.prepare('SELECT COALESCE(MAX(time_updated),0) t, COALESCE(MAX(rowid),0) r FROM message').get();
+      const maxPart = db.prepare('SELECT COALESCE(MAX(rowid),0) r FROM part').get();
+      const maxMsg  = db.prepare('SELECT COALESCE(MAX(rowid),0) r FROM message').get();
       return {
         db,
-        partCursor: { time: maxPart.t, rowid: maxPart.r },
-        msgCursor:  { time: maxMsg.t,  rowid: maxMsg.r },
+        partRowid: maxPart.r,
+        msgRowid: maxMsg.r,
+        pendingParts: new Map(), // id → true; seen but not yet terminal (recheck by id)
         stmtParts: db.prepare(
           `SELECT rowid, id, session_id, message_id, data, time_updated FROM part
-           WHERE time_updated > ? OR (time_updated = ? AND rowid > ?)
-           ORDER BY time_updated ASC, rowid ASC LIMIT 100`
+           WHERE rowid > ? ORDER BY rowid ASC LIMIT 100`
         ),
         stmtMessages: db.prepare(
           `SELECT rowid, id, session_id, data, time_updated FROM message
-           WHERE time_updated > ? OR (time_updated = ? AND rowid > ?)
-           ORDER BY time_updated ASC, rowid ASC LIMIT 100`
+           WHERE rowid > ? ORDER BY rowid ASC LIMIT 100`
+        ),
+        stmtPartById: db.prepare(
+          'SELECT rowid, id, session_id, message_id, data, time_updated FROM part WHERE id = ?'
         ),
         stmtPartsByMessage: db.prepare('SELECT id, data FROM part WHERE message_id = ? ORDER BY id ASC'),
       };
     } catch { return null; }
   }
 
-  // Drains a cursor's statement in LIMIT-100 pages until caught up, dispatching
-  // each row as it's fetched — a burst larger than one page still delivers
-  // every row, just across more queries. The cursor advances per row, AFTER
-  // that row's dispatch (success or logged failure), never before: advancing
-  // eagerly during the SELECT phase (an earlier design) let a dispatch-time
-  // exception on row N silently and permanently skip every row after it in
-  // the batch, since the cursor had already passed them before dispatch ever
-  // ran. One bad row is now logged and skipped — not a black hole for
-  // everything downstream of it.
-  function drainAndDispatch(stmt, cursor, buildRecord, dispatch) {
-    for (;;) {
-      const rows = stmt.all(cursor.time, cursor.time, cursor.rowid);
-      if (!rows.length) break;
-      for (const row of rows) {
-        try {
-          dispatch(buildRecord(row), row.session_id);
-        } catch (err) {
-          console.error(`[opencode] sqlite live-pulse dispatch failed for row ${row.id} (session ${row.session_id}) — skipping just this row:`, err);
-        }
-        cursor.time = row.time_updated;
-        cursor.rowid = row.rowid;
-      }
-      if (rows.length < 100) break;
-    }
+  function rememberPending(map, id) {
+    if (map.has(id)) return;
+    if (map.size >= PENDING_PARTS_CAP) map.delete(map.keys().next().value); // evict oldest
+    map.set(id, true);
+  }
+
+  function buildPartRecord(row) {
+    let pData = {};
+    try { pData = JSON.parse(row.data || '{}'); } catch {}
+    return { id: row.id, sessionID: row.session_id, messageID: row.message_id, ...pData };
   }
 
   function sqliteAndPulse(filePath, ctx) {
@@ -174,33 +189,71 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
       };
       const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
       const projectLabel = ctx.project_label || (resolveLabel ? resolveLabel(resolvedCtx, dbPath) : null);
-      emitPulses([record], { ...resolvedCtx, project_label: projectLabel });
+      return emitPulses([record], { ...resolvedCtx, project_label: projectLabel });
+    };
+
+    // Isolates one row's dispatch — a thrown exception is logged and skipped
+    // (not a black hole for the rest of the batch), matching the earlier
+    // per-row fix. Returns the pulse count (0 on error too).
+    const safeDispatch = (row, buildRecord) => {
+      try {
+        return dispatch(buildRecord(row), row.session_id);
+      } catch (err) {
+        console.error(`[opencode] sqlite live-pulse dispatch failed for row ${row.id} (session ${row.session_id}) — skipping just this row:`, err);
+        return 0;
+      }
+    };
+
+    const buildMsgRecord = (row) => {
+      let mData = {};
+      try { mData = JSON.parse(row.data || '{}'); } catch {}
+      const msgObj = { id: row.id, sessionID: row.session_id, ...mData };
+      // Message rows never carry their own text (only role/time/tokens/etc) —
+      // it lives in a separate `part` row. Join it so human_turn pulses
+      // carry real preview text, same as the JSON-tree adapter path does
+      // via `_parts`.
+      if (mData.role === 'user') {
+        msgObj._parts = reader.stmtPartsByMessage.all(row.id).map(p => {
+          let d = {};
+          try { d = JSON.parse(p.data || '{}'); } catch {}
+          return { id: p.id, ...d };
+        });
+      }
+      return msgObj;
     };
 
     try {
-      drainAndDispatch(reader.stmtParts, reader.partCursor, (row) => {
-        let pData = {};
-        try { pData = JSON.parse(row.data || '{}'); } catch {}
-        return { id: row.id, sessionID: row.session_id, messageID: row.message_id, ...pData };
-      }, dispatch);
-
-      drainAndDispatch(reader.stmtMessages, reader.msgCursor, (row) => {
-        let mData = {};
-        try { mData = JSON.parse(row.data || '{}'); } catch {}
-        const msgObj = { id: row.id, sessionID: row.session_id, ...mData };
-        // Message rows never carry their own text (only role/time/tokens/etc) —
-        // it lives in a separate `part` row. Join it so human_turn pulses
-        // carry real preview text, same as the JSON-tree adapter path does
-        // via `_parts`.
-        if (mData.role === 'user') {
-          msgObj._parts = reader.stmtPartsByMessage.all(row.id).map(p => {
-            let d = {};
-            try { d = JSON.parse(p.data || '{}'); } catch {}
-            return { id: p.id, ...d };
-          });
+      for (;;) {
+        const rows = reader.stmtParts.all(reader.partRowid);
+        if (!rows.length) break;
+        for (const row of rows) {
+          const pulses = safeDispatch(row, buildPartRecord);
+          if (pulses > 0) reader.pendingParts.delete(row.id);
+          else rememberPending(reader.pendingParts, row.id);
+          reader.partRowid = row.rowid;
         }
-        return msgObj;
-      }, dispatch);
+        if (rows.length < 100) break;
+      }
+
+      for (;;) {
+        const rows = reader.stmtMessages.all(reader.msgRowid);
+        if (!rows.length) break;
+        for (const row of rows) {
+          safeDispatch(row, buildMsgRecord);
+          reader.msgRowid = row.rowid;
+        }
+        if (rows.length < 100) break;
+      }
+
+      // Recheck sweep: parts seen earlier that hadn't reached a terminal
+      // status (pending/running) — an in-place UPDATE doesn't change rowid,
+      // so the sweep above will never re-surface it; re-fetch by id instead.
+      for (const id of [...reader.pendingParts.keys()]) {
+        const row = reader.stmtPartById.get(id);
+        if (!row) { reader.pendingParts.delete(id); continue; } // deleted since
+        const pulses = safeDispatch(row, buildPartRecord);
+        if (pulses > 0) reader.pendingParts.delete(id);
+      }
     } catch (err) {
       // The SELECT itself failing (locked db, corrupted file, etc) — the
       // cursor hasn't moved, so the next tick retries from the same point.
