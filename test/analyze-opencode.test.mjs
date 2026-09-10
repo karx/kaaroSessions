@@ -12,8 +12,10 @@ import path from 'node:path';
 
 import {
   readOpencodeSession,
+  readOpencodeDbSession,
   analyzeOpencodeSession,
   scanOpencodeSessions,
+  OPENCODE_VERSION_MARKERS,
 } from '../hooks/analyzers/analyze-opencode.mjs';
 
 let root; // temp storage root
@@ -97,6 +99,7 @@ test('analyzeOpencodeSession — canonical session shape', () => {
   assert.equal(session.session_id, SES_ID);
   assert.equal(session.harness, 'opencode');
   assert.equal(session.source, 'opencode');
+  assert.equal(session.version, '1.0.201');
   assert.equal(session.project_id, 'D--src-demo');     // unifies with CC project ids
   assert.equal(session.project_label, 'demo');
   assert.equal(session.slug, '4a89582b');              // ses_ prefix stripped
@@ -124,4 +127,83 @@ test('scanOpencodeSessions — finds sessions, skips noise', () => {
 
 test('scanOpencodeSessions — null when root missing', () => {
   assert.equal(scanOpencodeSessions(path.join(root, 'nope')), null);
+});
+
+// ── SQLite layout (opencode >= 1.18.x) ────────────────────────────────────────
+
+test('readOpencodeDbSession and analyzeOpencodeSession — reads from opencode.db', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  const dbPath = path.join(root, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      version TEXT,
+      project_id TEXT,
+      directory TEXT,
+      title TEXT,
+      time_created INTEGER,
+      time_updated INTEGER,
+      summary_additions INTEGER,
+      summary_deletions INTEGER,
+      summary_files INTEGER
+    );
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT
+    );
+    CREATE TABLE part (
+      id TEXT PRIMARY KEY,
+      message_id TEXT,
+      session_id TEXT,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT
+    );
+
+    INSERT INTO session (id, version, project_id, directory, title, time_created, time_updated, summary_additions, summary_deletions, summary_files)
+    VALUES ('ses_db1', '1.18.30', 'proj_sql', 'D:\\\\src\\\\sqlapp', 'Sqlite Session', 1780000000000, 1780000050000, 1, 0, 1);
+
+    INSERT INTO message (id, session_id, time_created, time_updated, data)
+    VALUES ('msg_u1', 'ses_db1', 1780000010000, 1780000010000, '{"role":"user"}');
+
+    INSERT INTO message (id, session_id, time_created, time_updated, data)
+    VALUES ('msg_a1', 'ses_db1', 1780000020000, 1780000040000, '{"role":"assistant","tokens":{"input":200,"output":80,"reasoning":0,"cache":{"read":100,"write":0}}}');
+
+    INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+    VALUES ('prt_u1', 'msg_u1', 'ses_db1', 1780000010000, 1780000010000, '{"type":"text","text":"hello from sqlite"}');
+
+    INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+    VALUES ('prt_a1', 'msg_a1', 'ses_db1', 1780000020000, 1780000030000, '{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"D:\\\\src\\\\sqlapp\\\\test.js"}}}');
+  `);
+  db.close();
+
+  const sessionData = readOpencodeDbSession(dbPath, 'ses_db1');
+  assert.ok(sessionData);
+  assert.equal(sessionData.info.id, 'ses_db1');
+  assert.equal(sessionData.info.version, '1.18.30');
+  assert.equal(sessionData.records.length, 3);
+
+  const session = analyzeOpencodeSession(root, dbPath, { dbPath, sessionId: 'ses_db1' });
+  assert.ok(session);
+  assert.equal(session.session_id, 'ses_db1');
+  assert.equal(session.version, '1.18.30');
+  assert.equal(session.ai_title, 'Sqlite Session');
+  assert.equal(session.project_label, 'sqlapp');
+  assert.equal(session.tool_calls, 1);
+  assert.equal(session.first_user_message, 'hello from sqlite');
+  assert.equal(session.tokens.input, 200);
+  assert.equal(session.tokens.output, 80);
+
+  // When both opencode.db and JSON session files exist, scanOpencodeSessions discovers both
+  const result = scanOpencodeSessions(root);
+  assert.ok(result);
+  assert.equal(result.sessions.length, 2);
+  const ids = result.sessions.map(s => s.session_id).sort();
+  assert.deepEqual(ids, ['ses_4a89582bbffe03xj4Y14Qtss1q', 'ses_db1']);
 });

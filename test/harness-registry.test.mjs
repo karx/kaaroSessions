@@ -84,10 +84,15 @@ test('adapter functions produce NormalizedRecords (smoke)', async () => {
   assert.ok(isNormalizedRecord(nrs[0]));
 });
 
-test('copilot watch config exposes resolveProjectLabel; others omit it', () => {
-  const cp = getHarness('copilot');
-  assert.equal(typeof cp.watch.resolveProjectLabel, 'function');
-  for (const id of ['claude-code', 'codex', 'pi', 'antigravity', 'grok', 'opencode']) {
+test('copilot + opencode watch configs expose resolveProjectLabel; others omit it', () => {
+  // Both harnesses split project attribution out of the watched file path:
+  // copilot's lives in a sibling workspace.json, opencode's message/part
+  // docs carry no directory of their own (only the session info doc does —
+  // see hooks/TRACE-opencode-sessions.md).
+  for (const id of ['copilot', 'opencode']) {
+    assert.equal(typeof getHarness(id).watch.resolveProjectLabel, 'function', `${id} should expose it`);
+  }
+  for (const id of ['claude-code', 'codex', 'pi', 'antigravity', 'grok']) {
     assert.equal(getHarness(id).watch.resolveProjectLabel, undefined, `${id} should omit it`);
   }
 });

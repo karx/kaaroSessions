@@ -237,6 +237,46 @@ test('resolveSessionFile — locates copilot chat session in workspace storage',
 
 // ── 8-char slug prefix parity (Mission Control, graph slug, /api/trace) ──
 
+test('resolveSessionFile — locates opencode session in opencode.db (both exact and 8-char slug)', async () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  const { mkdirSync: mk, rmSync: rm } = await import('fs');
+  const { tmpdir } = await import('os');
+  const root = join(tmpdir(), 'kaaro-oc-db-loc-' + Date.now());
+  mk(root, { recursive: true });
+  const dbPath = join(root, 'opencode.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      directory TEXT,
+      time_updated INTEGER
+    );
+    INSERT INTO session (id, project_id, directory, time_updated)
+    VALUES ('ses_f7364216999999', 'proj_abc', 'D:\\\\src\\\\test', 500);
+  `);
+  db.close();
+
+  try {
+    // 1. Exact ID
+    const exact = resolveSessionFile('ses_f7364216999999', { harness: 'opencode', roots: { opencode: root } });
+    assert.ok(exact, 'opencode session located in sqlite');
+    assert.equal(exact.sessionId, 'ses_f7364216999999');
+    assert.equal(exact.projectId, 'proj_abc');
+    assert.equal(exact.harness, 'opencode');
+    assert.equal(exact.format, 'sqlite');
+
+    // 2. 8-char slug prefix
+    const prefix = resolveSessionFile('f7364216', { harness: 'opencode', roots: { opencode: root } });
+    assert.ok(prefix, 'opencode session located by slug prefix in sqlite');
+    assert.equal(prefix.sessionId, 'ses_f7364216999999');
+  } finally {
+    rm(root, { recursive: true, force: true });
+  }
+});
+
 test('resolveSessionFile — locates opencode session by 8-char slug prefix', async () => {
   const { mkdirSync: mk, writeFileSync: wr, rmSync: rm } = await import('fs');
   const { tmpdir } = await import('os');

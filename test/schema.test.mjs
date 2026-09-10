@@ -92,6 +92,7 @@ test('OPTIONAL_PROJECT_FIELDS documents glyph identity and consumption', () => {
   for (const k of ['raw_ids', 'harnesses', 'tokens_total', 'tokens_work', 'tool_calls'])
     assert.ok(OPTIONAL_PROJECT_FIELDS.includes(k), k);
   assert.ok(OPTIONAL_SESSION_FIELDS.includes('tokens_total'));
+  assert.ok(OPTIONAL_SESSION_FIELDS.includes('version'));
 });
 
 // ── validateSessionsData ──────────────────────────────────────────────────────

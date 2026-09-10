@@ -22,10 +22,11 @@
 import { deriveLabel } from './helpers/analyze-helpers.mjs';
 import {
   CLAUDE_PROJECTS_ROOT, CODEX_HOME_ROOT, PI_SESSIONS_ROOT, ANTIGRAVITY_BRAIN_ROOT, GROK_SESSIONS_ROOT,
-  OPENCODE_STORAGE_ROOT, COPILOT_WORKSPACE_STORAGE_ROOT, COMMANDCODE_PROJECTS_ROOT,
+  OPENCODE_ROOT, OPENCODE_STORAGE_ROOT, COPILOT_WORKSPACE_STORAGE_ROOT, COMMANDCODE_PROJECTS_ROOT,
 } from './harness-paths.mjs';
 import { deriveGrokProjectId, deriveGrokLabel } from './helpers/grok-helpers.mjs';
 import { copilotWorkspaceLabel } from './helpers/copilot-helpers.mjs';
+import { opencodeSessionLabel, OPENCODE_VERSION_MARKERS } from './helpers/opencode-helpers.mjs';
 import {
   locateClaudeCodeSession, locateCodexSession, locatePiSession, locateAntigravitySession, locateGrokSession,
   locateOpencodeSession, locateCopilotSession, locateCommandCodeSession,
@@ -33,7 +34,7 @@ import {
 import path from 'node:path';
 import { parseJsonlFile } from './jsonl-io.mjs';
 import { readGrokSession } from './analyzers/analyze-grok.mjs';
-import { readOpencodeSession } from './analyzers/analyze-opencode.mjs';
+import { readOpencodeSession, readOpencodeDbSession } from './analyzers/analyze-opencode.mjs';
 import { readCopilotSession } from './analyzers/analyze-copilot.mjs';
 
 // Default transcript reader for JSONL-file harnesses; harness-specific
@@ -292,31 +293,46 @@ export const HARNESS_REGISTRY = [
     adapter: ocAdapter,
     scan: { module: './analyzers/analyze-opencode.mjs', export: 'scanOpencodeSessions' },
     locateSession: locateOpencodeSession,
-    // filePath is the session info doc; messages + parts are assembled from
-    // the sibling storage trees (storageRoot = two levels up from the info).
-    readSessionRecords(filePath) {
+    // filePath is either the session info doc (JSON) or opencode.db (SQLite).
+    readSessionRecords(filePath, sessionId) {
+      if (filePath.endsWith('.db')) {
+        const result = readOpencodeDbSession(filePath, sessionId);
+        return { records: result?.records || [] };
+      }
       const storageRoot = path.dirname(path.dirname(path.dirname(filePath)));
       return { records: readOpencodeSession(storageRoot, filePath).records };
     },
-    roots: [OPENCODE_STORAGE_ROOT],
+    roots: [OPENCODE_ROOT, OPENCODE_STORAGE_ROOT],
     capabilities: {
       tokens: true, pulse: true, trace: true,
       context_resets: false, ai_title: true, subagent_count: false, branches: false,
       size_proxy: 'tokens_work',
     },
     watch: {
-      // storage spreads a session across three JSON trees; only these carry
-      // transcript signal (project/, session_diff/, snapshot/, log/ are noise)
+      // Storage spreads a session across three JSON trees (opencode <= 1.0.x)
+      // or a SQLite db (opencode >= 1.18.x); only these carry transcript signal.
       matchLogFile(rel) {
         const n = rel.replace(/\\/g, '/');
-        return /^session\/[^/]+\/ses_[^/]+\.json$/.test(n)
-            || /^message\/[^/]+\/msg_[^/]+\.json$/.test(n)
-            || /^part\/[^/]+\/prt_[^/]+\.json$/.test(n);
+        return /^(?:storage\/)?session\/[^/]+\/ses_[^/]+\.json$/.test(n)
+            || /^(?:storage\/)?message\/[^/]+\/msg_[^/]+\.json$/.test(n)
+            || /^(?:storage\/)?part\/[^/]+\/prt_[^/]+\.json$/.test(n)
+            || n === 'opencode.db'
+            || n === 'opencode.db-wal';
       },
-      // Files are whole pretty-printed JSON documents, not JSONL — read_mode
-      // tells serve to parse the full file instead of tailing line-by-line.
+      // Files are whole pretty-printed JSON documents (read_mode: json) or SQLite db.
       ctxFromPath(relPath) {
-        const parts = relPath.replace(/\\/g, '/').split('/');
+        const n = relPath.replace(/\\/g, '/');
+        if (n === 'opencode.db' || n === 'opencode.db-wal') {
+          return {
+            harness: 'opencode', session_id: null,
+            slug: null, project_id: null, project_label: null,
+            read_mode: 'sqlite',
+            version_marker: OPENCODE_VERSION_MARKERS.V2_SQLITE_DB,
+          };
+        }
+        let stripped = n;
+        if (stripped.startsWith('storage/')) stripped = stripped.slice('storage/'.length);
+        const parts = stripped.split('/');
         if (parts.length < 3) return null;
         let session_id = null;
         if (parts[0] === 'session')      session_id = parts[2].replace(/\.json$/, '');
@@ -325,9 +341,18 @@ export const HARNESS_REGISTRY = [
         return {
           harness: 'opencode', session_id,
           slug: session_id ? opencodeSlug(session_id) : null,
-          project_id: null, project_label: null,
+          project_id: null, project_label: null, // resolveProjectLabel fills this lazily
           read_mode: 'json',
+          version_marker: OPENCODE_VERSION_MARKERS.V1_STORAGE_JSON,
         };
+      },
+      // message/part docs carry no directory/cwd of their own — resolve the
+      // session's directory from its info doc or SQLite row, cached per session id.
+      resolveProjectLabel: (ctx, absPath) => {
+        if (absPath.endsWith('.db') || absPath.endsWith('.db-wal')) {
+          return opencodeSessionLabel(ctx.session_id, path.dirname(absPath));
+        }
+        return opencodeSessionLabel(ctx.session_id, path.dirname(path.dirname(path.dirname(absPath))));
       },
       rebuildArg: () => null,
     },

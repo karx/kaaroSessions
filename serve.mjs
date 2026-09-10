@@ -25,6 +25,7 @@ import { createActiveState } from './surface/active-state.mjs';
 import { createHub } from './surface/sse-hub.mjs';
 import { createPulseEmitter } from './surface/pulse-emitter.mjs';
 import { createRebuilder } from './surface/rebuild-orchestrator.mjs';
+import { createWatchScheduler } from './surface/watch-scheduler.mjs';
 import { createRequestHandler } from './surface/http-routes.mjs';
 import { createKindMapStore } from './surface/kind-map-store.mjs';
 import { buildKindMap } from './surface/kind-map-build.mjs';
@@ -94,42 +95,58 @@ const { rebuild, scheduleRebuild } = rebuilder;
 
 // ── File watcher (registry-driven) ────────────────────────────────────────────
 
+// The raw fs.watch callback (registered below) must return to libuv near-
+// instantly: on Windows, a slow synchronous callback delays re-arming the
+// underlying ReadDirectoryChangesW read, which is how the kernel's
+// fixed-size notification buffer silently overflows under write bursts (see
+// RFC-opencode-watch-reliability.md §3). So handleWatchEvent itself does only
+// the cheap regex match + a Map write; the actual tail/pulse/rebuild work is
+// deferred through watchScheduler to a later event-loop tick, off the
+// fs.watch callback's own call stack.
+const watchScheduler = createWatchScheduler({
+  onEvent(event) {
+    tailAndPulse(event.absPath, event.ctx);
+
+    // Surgical cache invalidation: only evict the session whose file just changed.
+    // Other cached resolutions remain valid and fast.
+    invalidateSessionResolveCache(event.ctx.session_id);
+
+    // Prefer targeted rebuild when the harness provides a rebuildArg (e.g. --session=...).
+    // This enables the fast incremental path in analyze for supported harnesses (CC today)
+    // instead of always doing a full --all-harnesses scan on every keystroke.
+    if (event.rebuildArg) {
+      scheduleRebuild({ rebuildArg: event.rebuildArg, harnessId: event.harnessId });
+    } else {
+      scheduleRebuild();
+    }
+  },
+});
+
 function handleWatchEvent(harnessId, rootDir, filename) {
   const event = processWatchFilename(harnessId, filename, rootDir);
   if (!event) return;
   console.log(`  changed: [${harnessId}] ${event.relPath}`);
-  tailAndPulse(event.absPath, event.ctx);
-
-  // Surgical cache invalidation: only evict the session whose file just changed.
-  // Other cached resolutions remain valid and fast.
-  invalidateSessionResolveCache(event.ctx.session_id);
-
-  // Prefer targeted rebuild when the harness provides a rebuildArg (e.g. --session=...).
-  // This enables the fast incremental path in analyze for supported harnesses (CC today)
-  // instead of always doing a full --all-harnesses scan on every keystroke.
-  if (event.rebuildArg) {
-    scheduleRebuild({ rebuildArg: event.rebuildArg, harnessId: event.harnessId });
-  } else {
-    scheduleRebuild();
-  }
+  watchScheduler.schedule(event.absPath, event);
 }
 
 let watchCount = 0;
 for (const harness of getEnabledHarnesses()) {
-  const root = harness.roots[0];
-  if (!root) continue;
-  try {
-    if (!fs.existsSync(root)) {
-      console.warn(`[${harness.id}] root not found — skipped: ${root}`);
-      continue;
+  const existingRoots = (harness.roots || []).filter(r => r && fs.existsSync(r));
+  const rootsToWatch = existingRoots.filter((r, i) => !existingRoots.some((other, j) => i !== j && r.startsWith(other + path.sep)));
+  if (!rootsToWatch.length && harness.roots?.[0]) {
+    console.warn(`[${harness.id}] root not found — skipped: ${harness.roots[0]}`);
+    continue;
+  }
+  for (const root of rootsToWatch) {
+    try {
+      fs.watch(root, { recursive: true }, (_, filename) => {
+        handleWatchEvent(harness.id, root, filename);
+      });
+      console.log(`Watching [${harness.id}]: ${root}`);
+      watchCount++;
+    } catch (e) {
+      console.warn(`[${harness.id}] watch unavailable: ${e.message}`);
     }
-    fs.watch(root, { recursive: true }, (_, filename) => {
-      handleWatchEvent(harness.id, root, filename);
-    });
-    console.log(`Watching [${harness.id}]: ${root}`);
-    watchCount++;
-  } catch (e) {
-    console.warn(`[${harness.id}] watch unavailable: ${e.message}`);
   }
 }
 

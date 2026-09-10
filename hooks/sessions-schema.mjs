@@ -134,6 +134,7 @@ export function validateSession(s) {
  *                                  (W-OBS-02). Window opens at skill_invoke, closes at
  *                                  next skill_invoke, and dies at context_reset.
  *                                  {} when no real skills invoked.
+ * version          : string      — harness or CLI version (e.g. "1.0.201", "1.18.30")
  */
 export const OPTIONAL_SESSION_FIELDS = [
   'first_timestamp', 'last_timestamp', 'duration_min', 'git_branch',
@@ -143,6 +144,7 @@ export const OPTIONAL_SESSION_FIELDS = [
   'first_user_message', 'file_ops', 'harness', 'source',
   'context_resets', 'ai_title', 'subagent_count', 'subagents', 'branches',
   'tokens_work', 'tokens_total', 'skill_timeline', 'skill_attribution',
+  'version',
 ];
 
 /**

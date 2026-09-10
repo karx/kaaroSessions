@@ -12,8 +12,14 @@ export const ANTIGRAVITY_BRAIN_ROOT = path.join(
   os.homedir(), '.gemini', 'antigravity', 'brain'
 );
 export const GROK_SESSIONS_ROOT = path.join(os.homedir(), '.grok', 'sessions');
+export const OPENCODE_ROOT = path.join(
+  os.homedir(), '.local', 'share', 'opencode'
+);
 export const OPENCODE_STORAGE_ROOT = path.join(
-  os.homedir(), '.local', 'share', 'opencode', 'storage'
+  OPENCODE_ROOT, 'storage'
+);
+export const OPENCODE_DB_PATH = path.join(
+  OPENCODE_ROOT, 'opencode.db'
 );
 
 // VS Code user-data dir is platform-specific; Copilot chat sessions live in

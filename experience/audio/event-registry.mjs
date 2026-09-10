@@ -65,6 +65,14 @@ export const EVENT_TYPES = {
         },
         expect: [{ kind: 'tool_use', tool: 'view_file' }],
       },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'prt_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', tool: 'read',
+          state: { status: 'completed', input: { filePath: 'src/index.mjs' }, time: { start: 1, end: 2 } },
+        },
+        expect: [{ kind: 'tool_use', tool: 'read' }],
+      },
     },
   },
 
@@ -82,6 +90,14 @@ export const EVENT_TYPES = {
           ]},
         },
         expect: [{ kind: 'tool_use', tool: 'Write' }],
+      },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'prt_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', tool: 'write',
+          state: { status: 'completed', input: { filePath: 'out.mjs' }, time: { start: 1, end: 2 } },
+        },
+        expect: [{ kind: 'tool_use', tool: 'write' }],
       },
     },
   },
@@ -109,6 +125,14 @@ export const EVENT_TYPES = {
         },
         expect: [{ kind: 'tool_use', tool: 'replace_file_content' }],
       },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'prt_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', tool: 'edit',
+          state: { status: 'completed', input: { filePath: 'src/a.mjs' }, time: { start: 1, end: 2 } },
+        },
+        expect: [{ kind: 'tool_use', tool: 'edit' }],
+      },
     },
   },
 
@@ -127,6 +151,14 @@ export const EVENT_TYPES = {
         },
         expect: [{ kind: 'tool_use', tool: 'Grep' }],
       },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'prt_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', tool: 'glob',
+          state: { status: 'completed', input: { pattern: '**/*.mjs' }, time: { start: 1, end: 2 } },
+        },
+        expect: [{ kind: 'tool_use', tool: 'glob' }],
+      },
     },
   },
 
@@ -144,6 +176,14 @@ export const EVENT_TYPES = {
           ]},
         },
         expect: [{ kind: 'tool_use', tool: 'Agent' }],
+      },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'prt_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', tool: 'task',
+          state: { status: 'completed', input: {}, title: 'explore codebase', time: { start: 1, end: 2 } },
+        },
+        expect: [{ kind: 'tool_use', tool: 'task' }],
       },
     },
   },
@@ -194,6 +234,15 @@ export const EVENT_TYPES = {
         },
         expect: [{ kind: 'tokens', tokens: { input: 500, output: 200, cache_create: 0, cache_read: 8000 } }],
       },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'msg_1', sessionID: 'ses_1', role: 'assistant', time: { created: 1, completed: 2 },
+          modelID: 'big-pickle', providerID: 'opencode', finish: 'tool-calls',
+          tokens: { input: 500, output: 200, reasoning: 0, cache: { read: 8000, write: 0 } },
+        },
+        expect: [{ kind: 'tokens', tokens: { input: 500, output: 200, cache_create: 0, cache_read: 8000 } }],
+      },
     },
   },
 
@@ -210,6 +259,11 @@ export const EVENT_TYPES = {
         },
         expect: [{ kind: 'content_block', block_type: 'text', text: 'Running the tests now.' }],
       },
+      'opencode': {
+        version: 1,
+        record: { id: 'prt_1', type: 'text', time: { start: 1 }, text: 'Running the tests now.' },
+        expect: [{ kind: 'content_block', block_type: 'text', text: 'Running the tests now.' }],
+      },
     },
   },
 
@@ -224,6 +278,11 @@ export const EVENT_TYPES = {
           type: 'assistant', timestamp: '2026-06-09T10:00:00.000Z',
           message: { content: [{ type: 'text', text: 'Got it.' }] },
         },
+        expect: [{ kind: 'content_block', block_type: 'text', text: 'Got it.' }],
+      },
+      'opencode': {
+        version: 1,
+        record: { id: 'prt_1', type: 'text', time: { start: 1 }, text: 'Got it.' },
         expect: [{ kind: 'content_block', block_type: 'text', text: 'Got it.' }],
       },
     },
@@ -249,6 +308,14 @@ export const EVENT_TYPES = {
           content: '<USER_REQUEST>\nRun all the tests please\n</USER_REQUEST>',
         },
         expect: [{ kind: 'user_turn', harness: 'antigravity' }],
+      },
+      'opencode': {
+        version: 1,
+        record: {
+          id: 'msg_1', sessionID: 'ses_1', role: 'user', time: { created: 1 },
+          _parts: [{ id: 'prt_1', type: 'text', text: 'Run all the tests please' }],
+        },
+        expect: [{ kind: 'user_turn', harness: 'opencode' }],
       },
     },
   },
