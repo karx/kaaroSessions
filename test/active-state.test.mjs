@@ -75,6 +75,18 @@ test('applyPulse tool_call — increments across pulses, updates last_tool', () 
   assert.equal(s.last_seen, T0 + 5000);
 });
 
+test('applyPulse tool_call — tools_by_key histogram for mapping-style chips', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('tool_call', { tool: 'Read', key: 'read' }), T0);
+  applyPulse(state, pulse('tool_call', { tool: 'Read', key: 'read' }), T0 + 1);
+  applyPulse(state, pulse('tool_call', { tool: 'Edit', key: 'edit' }), T0 + 2);
+  applyPulse(state, pulse('tool_call', { tool: 'Weird', key: null }), T0 + 3);
+
+  const s = snapshotActive(state, T0 + 3).sessions[0];
+  assert.deepEqual(s.tools_by_key, { read: 2, edit: 1, other: 1 });
+  assert.equal(snapshotActive(createActiveState(), T0).sessions.length, 0);
+});
+
 test('applyPulse tool_error — increments tool_errors', () => {
   const state = createActiveState();
   applyPulse(state, pulse('tool_call', { tool: 'Bash', key: 'bash_run', where: null, why: 'npm test' }), T0);
@@ -123,6 +135,73 @@ test('synthetic tokens count toward burn rate', () => {
   assert.equal(s.burn_rate_per_min, 80);
 });
 
+test('applyPulse tokens — last_tokens is latest absolute window, not cumulative', () => {
+  const state = createActiveState();
+  assert.equal(snapshotActive(state, T0).sessions.length, 0);
+
+  applyPulse(state, pulse('tokens', { input: 100, output: 50, cache_create: 200, cache_read: 1000 }), T0);
+  let s = snapshotActive(state, T0).sessions[0];
+  assert.deepEqual(s.last_tokens, { input: 100, cache_read: 1000, ts: T0 });
+  assert.deepEqual(s.tokens, { input: 100, output: 50, cache_create: 200, cache_read: 1000 });
+
+  // Second pulse: cumulative sums keep growing; last_tokens overwrites.
+  applyPulse(state, pulse('tokens', { input: 10, output: 5, cache_create: 20, cache_read: 100 }), T0 + 1000);
+  s = snapshotActive(state, T0 + 1000).sessions[0];
+  assert.deepEqual(s.tokens, { input: 110, output: 55, cache_create: 220, cache_read: 1100 });
+  assert.deepEqual(s.last_tokens, { input: 10, cache_read: 100, ts: T0 + 1000 });
+});
+
+test('applyPulse tokens — output-only pulse does not invent a zero window for pressure', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('tokens', { output: 40 }), T0);
+  const s = snapshotActive(state, T0).sessions[0];
+  assert.equal(s.last_tokens, null, 'no absolute window → leave last_tokens unset');
+  assert.equal(s.tokens_work, 40);
+});
+
+test('applyPulse tokens — synthetic / zero-window does not stamp last_tokens', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('tokens', {
+    synthetic: true, input: 0, output: 80, cache_create: 0, cache_read: 0,
+  }), T0);
+  let s = snapshotActive(state, T0).sessions[0];
+  assert.equal(s.last_tokens, null);
+  assert.equal(s.tokens_work, 80);
+
+  // Real window later still wins.
+  applyPulse(state, pulse('tokens', { input: 50_000, output: 10, cache_read: 10_000 }), T0 + 1);
+  s = snapshotActive(state, T0 + 1).sessions[0];
+  assert.deepEqual(s.last_tokens, { input: 50_000, cache_read: 10_000, ts: T0 + 1 });
+
+  // Later synthetic must not wipe a real window.
+  applyPulse(state, pulse('tokens', {
+    synthetic: true, input: 0, output: 20, cache_create: 0, cache_read: 0,
+  }), T0 + 2);
+  s = snapshotActive(state, T0 + 2).sessions[0];
+  assert.deepEqual(s.last_tokens, { input: 50_000, cache_read: 10_000, ts: T0 + 1 });
+});
+
+test('snapshot — last_tokens null until first tokens pulse', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('tool_call', { tool: 'Read', key: 'read', where: 'a', why: null }), T0);
+  assert.equal(snapshotActive(state, T0).sessions[0].last_tokens, null);
+});
+
+test('applyPulse thinking — count + live ts, but do not spam the actions ring', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('thinking'), T0);
+  applyPulse(state, pulse('thinking'), T0 + 1);
+  applyPulse(state, pulse('tool_call', { tool: 'Read', key: 'read' }), T0 + 2);
+  applyPulse(state, pulse('thinking'), T0 + 3);
+
+  const s = snapshotActive(state, T0 + 3).sessions[0];
+  assert.equal(s.thinking_count, 3);
+  assert.equal(s.last_thinking_ts, T0 + 3);
+  assert.equal(s.recent_actions.filter(a => a.type === 'thinking').length, 0);
+  assert.equal(s.recent_actions.length, 1);
+  assert.equal(s.recent_actions[0].type, 'tool_call');
+});
+
 // ── words / human turns / compacts ───────────────────────────────────────────
 
 test('applyPulse words — counts and keeps last preview', () => {
@@ -144,6 +223,16 @@ test('applyPulse human_turn / compact — tracked', () => {
   assert.equal(s.human_turns, 1);
   assert.equal(s.last_human_ts, T0);
   assert.equal(s.compacts, 1);
+});
+
+test('applyPulse compact — clears last_tokens so pressure is not pre-compact', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('tokens', { input: 80_000, output: 10, cache_read: 20_000 }), T0);
+  assert.ok(snapshotActive(state, T0).sessions[0].last_tokens);
+  applyPulse(state, pulse('compact', {}), T0 + 1);
+  const s = snapshotActive(state, T0 + 1).sessions[0];
+  assert.equal(s.compacts, 1);
+  assert.equal(s.last_tokens, null);
 });
 
 // ── status transitions ────────────────────────────────────────────────────────
@@ -226,12 +315,62 @@ test('project backfills when a later pulse carries it (opencode part files)', ()
   assert.equal(snapshotActive(state, T0 + 1000).sessions[0].project, 'bun-ai-minecraft');
 });
 
-test('unknown pulse events still bump last_seen/last_event', () => {
+test('unknown pulse events still bump last_seen/last_event only', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('mystery_pulse', { nr_kind: 'unknown_record' }), T0);
+  const s = snapshotActive(state, T0).sessions[0];
+  assert.equal(s.last_event, 'mystery_pulse');
+  assert.equal(s.tool_calls, 0);
+  assert.equal(s.thinking_count, 0);
+  assert.equal(s.attachments, 0);
+  assert.equal(s.scaffolds, 0);
+});
+
+// ── thinking / attachment / scaffold (typed MC signals) ──────────────────────
+
+test('applyPulse thinking — count + last_thinking_ts without ring rows', () => {
   const state = createActiveState();
   applyPulse(state, pulse('thinking', { block_type: 'thinking' }), T0);
-  const s = snapshotActive(state, T0).sessions[0];
+  applyPulse(state, pulse('thinking', { block_type: 'thinking' }), T0 + 500);
+
+  const s = snapshotActive(state, T0 + 500).sessions[0];
+  assert.equal(s.thinking_count, 2);
+  assert.equal(s.last_thinking_ts, T0 + 500);
   assert.equal(s.last_event, 'thinking');
-  assert.equal(s.tool_calls, 0);
+  assert.equal(s.recent_actions.length, 0);
+});
+
+test('applyPulse attachment — count + ring with subtype', () => {
+  const state = createActiveState();
+  applyPulse(state, pulse('attachment', { subtype: 'invoked_skills' }), T0);
+  const s = snapshotActive(state, T0).sessions[0];
+  assert.equal(s.attachments, 1);
+  assert.deepEqual(s.recent_actions[0], { type: 'attachment', ts: T0, subtype: 'invoked_skills' });
+});
+
+test('applyPulse scaffold — count + truncated content_preview on ring', () => {
+  const state = createActiveState();
+  const long = 'x'.repeat(120);
+  applyPulse(state, pulse('scaffold', { content_preview: long }), T0);
+  const s = snapshotActive(state, T0).sessions[0];
+  assert.equal(s.scaffolds, 1);
+  assert.equal(s.recent_actions[0].type, 'scaffold');
+  assert.equal(s.recent_actions[0].content_preview.length, 80);
+});
+
+test('attachment/scaffold share the 50-cap recent_actions ring (thinking excluded)', () => {
+  const state = createActiveState();
+  const base = { session_id: 's1', slug: 's1slug', harness: 'claude-code', project: 'p' };
+  for (let i = 0; i < 30; i++) {
+    applyPulse(state, { event: 'thinking', data: { ...base } }, 1000 + i);
+    applyPulse(state, { event: 'attachment', data: { ...base, subtype: 'file' } }, 2000 + i);
+    applyPulse(state, { event: 'scaffold', data: { ...base, content_preview: 'nudge' } }, 3000 + i);
+  }
+  const s = snapshotActive(state, 4000).sessions[0];
+  assert.equal(s.thinking_count, 30);
+  assert.equal(s.recent_actions.length, 50);
+  assert.ok(s.recent_actions.every(a => a.type === 'attachment' || a.type === 'scaffold'));
+  assert.equal(s.recent_actions.filter(a => a.type === 'thinking').length, 0);
 });
 
 // ── E4: recent-actions ring + permission/mode/api_error tracking ─────────────

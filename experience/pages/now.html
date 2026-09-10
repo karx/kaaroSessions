@@ -6,7 +6,7 @@
 <title>kaaro-sessions — mission control</title>
 <style>
 %%TOKENS_CSS%%
-  /* Register A — Financial Terminal */
+  /* Register A — Mission Control. Class names encode pulse + session state. */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
@@ -19,7 +19,6 @@
     overflow: hidden;
   }
 
-  /* ── Topbar ─────────────────────────────────────────────────────────── */
   #topbar {
     display: flex; align-items: center; gap: 16px;
     padding: 0 12px;
@@ -35,77 +34,330 @@
   #live-badge.err { color: var(--k-err); }
   #live-badge.dim { color: var(--k-dim); }
 
-  /* ── Main ───────────────────────────────────────────────────────────── */
   #main { overflow-y: auto; padding: 12px; }
 
-  /* Per-harness rollup strip */
+  /* ── Harness rollup ─────────────────────────────────────────────────── */
   #harness-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  .harness-cell {
+  .mc-harness {
     background: var(--k-panel); border: 1px solid var(--k-border);
     padding: 6px 10px; min-width: 150px;
   }
-  .harness-cell .hname { color: var(--k-label); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
-  .harness-cell .hstats { color: var(--k-dim); font-size: 11px; margin-top: 2px; }
-  .harness-cell .hstats b { color: var(--k-data); font-weight: 400; }
-  .harness-cell .hstats .on { color: var(--k-geo); }
-  .harness-cell .hcaps { color: var(--k-dim); font-size: 9px; margin-top: 2px; letter-spacing: 0.06em; }
-  .harness-cell .hcaps .cap { color: var(--k-select); }
+  .mc-harness__name { color: var(--k-label); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+  .mc-harness__stats { color: var(--k-dim); font-size: 11px; margin-top: 2px; }
+  .mc-harness__stats b { color: var(--k-data); font-weight: 400; }
+  .mc-harness__stats .on { color: var(--k-geo); }
+  .mc-harness__caps { color: var(--k-dim); font-size: 9px; margin-top: 2px; letter-spacing: 0.06em; }
+  .mc-harness__caps .cap { color: var(--k-select); }
 
-  /* Session cards */
-  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; }
-  .card {
+  /* ── Legend — pulse + state grammar (swatches mirror card left-rail) ── */
+  #mc-legend {
+    display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: baseline;
+    margin-bottom: 10px; padding: 6px 8px;
+    border: 1px solid var(--k-border); background: var(--k-panel);
+    font-size: 9px; letter-spacing: 0.06em; color: var(--k-dim);
+  }
+  .mc-legend__group { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .mc-legend__hd {
+    color: var(--k-label); text-transform: uppercase; letter-spacing: 0.1em; margin-right: 2px;
+  }
+  .mc-legend__item { display: inline-flex; align-items: center; gap: 4px; }
+  .mc-legend__swatch {
+    display: inline-block; width: 8px; height: 10px;
+    border: 1px solid var(--k-border); border-left-width: 2px; background: var(--k-card);
+  }
+  .mc-legend__swatch--geo    { border-left-color: var(--k-geo); }
+  .mc-legend__swatch--dim    { border-left-color: var(--k-dim); }
+  .mc-legend__swatch--accent { border-left-color: var(--k-accent); }
+  .mc-legend__swatch--label  { border-left-color: var(--k-label); }
+  .mc-legend__swatch--select { border-left-color: var(--k-select); }
+  .mc-legend__swatch--data   { border-left-color: var(--k-data); }
+  .mc-legend__swatch--err    { border-left-color: var(--k-err); }
+  .mc-legend__swatch--fill {
+    width: 14px; height: 3px; border: 1px solid var(--k-border); border-left-width: 1px;
+  }
+  .mc-legend__swatch--fill.mc-legend__swatch--geo    { background: var(--k-geo); }
+  .mc-legend__swatch--fill.mc-legend__swatch--select { background: var(--k-select); }
+  .mc-legend__swatch--fill.mc-legend__swatch--err    { background: var(--k-err); }
+
+  /* Idle board controls */
+  #mc-idle-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 10px; font-size: 10px; letter-spacing: 0.06em; color: var(--k-dim);
+  }
+  .mc-idle-btn {
+    background: var(--k-panel); color: var(--k-label); border: 1px solid var(--k-border);
+    font: inherit; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 3px 8px; cursor: pointer;
+  }
+  .mc-idle-btn:hover { color: var(--k-accent); border-color: var(--k-accent); }
+  .mc-idle-btn.on { color: var(--k-geo); border-color: var(--k-geo); }
+  .mc-idle-btn:focus { outline: 1px solid var(--k-select); outline-offset: 1px; }
+  .mc-idle-note { color: var(--k-dim); }
+
+  /* ── Board = harness lanes (not a flat card wall) ───────────────────── */
+  #cards {
+    display: flex; flex-direction: row; flex-wrap: nowrap; gap: 10px;
+    align-items: flex-start; overflow-x: auto; padding-bottom: 8px;
+  }
+  .mc-lane {
+    flex: 0 0 auto; width: min(380px, 86vw);
+    border: 1px solid var(--k-border); background: var(--k-panel);
+    display: flex; flex-direction: column; min-height: 120px;
+  }
+  .mc-lane__hd {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 6px 8px; border-bottom: 1px solid var(--k-border);
+    position: sticky; top: 0; background: var(--k-panel); z-index: 1;
+  }
+  .mc-lane__name {
+    color: var(--k-label); text-transform: uppercase; letter-spacing: 0.1em;
+    font-size: 10px; font-weight: 700;
+  }
+  .mc-lane__stats { color: var(--k-dim); font-size: 10px; }
+  .mc-lane__stats .on { color: var(--k-geo); }
+  .mc-lane__stats b { color: var(--k-data); font-weight: 400; }
+  .mc-lane__caps { margin-left: auto; color: var(--k-dim); font-size: 9px; letter-spacing: 0.06em; }
+  .mc-lane__caps .cap { color: var(--k-select); }
+  .mc-lane__cards {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 6px; max-height: calc(100vh - 220px); overflow-y: auto;
+  }
+  .mc-lane--empty .mc-lane__cards {
+    color: var(--k-dim); font-size: 10px; letter-spacing: 0.06em; padding: 12px 8px;
+  }
+
+  #harness-strip { display: none; } /* lanes own harness chrome */
+
+  /*
+   * Scan grammar (one channel each):
+   *   left rail  = lifecycle (idle) or latest pulse (active)
+   *   alert line = errors only (never full-card border)
+   *   meter      = context pressure
+   *   status text = active/idle word
+   */
+  .mc-card {
     background: var(--k-card); border: 1px solid var(--k-border);
-    padding: 8px 10px; cursor: pointer;
+    border-left: 2px solid var(--k-dim);
+    padding: 8px 10px; cursor: pointer; width: 100%;
   }
-  .card.active { border-left: 2px solid var(--k-geo); }
-  .card.idle   { border-left: 2px solid var(--k-dim); }
-  .card .row1 { display: flex; align-items: baseline; gap: 8px; }
-  .card .status { font-size: 10px; letter-spacing: 0.08em; }
-  .card.active .status { color: var(--k-geo); }
-  .card.idle   .status { color: var(--k-dim); }
-  .card .slug { color: var(--k-select); font-weight: 700; }
-  .card .project { color: var(--k-label); }
-  .card .harness { color: var(--k-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; margin-left: auto; }
-  .card .titleline { color: var(--k-body); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .toolline { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .toolline .sym { color: var(--k-accent); }
-  .card .toolline .tool { color: var(--k-accent); }
-  .card .toolline .where { color: var(--k-dim); }
-  .card .modes { margin-top: 3px; font-size: 9px; letter-spacing: 0.06em; color: var(--k-dim); }
-  .card .modes .mode { color: var(--k-select); }
-  .card .apierr { margin-top: 3px; font-size: 10px; color: var(--k-err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .preview { color: var(--k-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: italic; }
-  .card .metrics { display: flex; gap: 12px; margin-top: 5px; font-size: 10px; color: var(--k-dim); }
-  .card .metrics b { color: var(--k-data); font-weight: 400; }
-  .card .metrics .errs b { color: var(--k-err); }
-  .card .metrics .ago { margin-left: auto; }
-  .card.active .metrics .ago { color: var(--k-geo); }
-  .card .burn { color: var(--k-data); }
+  .mc-card--idle { opacity: 0.9; }
+  .mc-card--active { opacity: 1; }
+  /* Enter: new cards fade/slide in (≤250ms Register A) */
+  .mc-card--enter {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  .mc-card--enter-active {
+    opacity: 1;
+    transform: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mc-card--enter,
+    .mc-card--enter-active { opacity: 1; transform: none; transition: none; }
+  }
+  .mc-card--idle { border-left-color: var(--k-dim); }
+  .mc-card--active { border-left-color: var(--k-geo); }
+  .mc-card--open { background: var(--k-panel); }
+  /* Latest pulse → left rail (active sessions). Idle keeps dim rail. */
+  .mc-card--active.mc-card--evt-tool_call { border-left-color: var(--k-accent); }
+  .mc-card--active.mc-card--evt-tokens,
+  .mc-card--active.mc-card--evt-words,
+  .mc-card--active.mc-card--evt-chirp { border-left-color: var(--k-data); }
+  .mc-card--active.mc-card--evt-human_turn { border-left-color: var(--k-label); }
+  .mc-card--active.mc-card--evt-thinking { border-left-color: var(--k-select); }
+  .mc-card--active.mc-card--evt-compact { border-left-color: var(--k-data); }
+  .mc-card--active.mc-card--evt-attachment,
+  .mc-card--active.mc-card--evt-scaffold,
+  .mc-card--active.mc-card--evt-permission,
+  .mc-card--active.mc-card--evt-mode_shift,
+  .mc-card--active.mc-card--evt-other { border-left-color: var(--k-dim); }
+  .mc-card--active.mc-card--evt-tool_error,
+  .mc-card--active.mc-card--evt-api_error { border-left-color: var(--k-err); }
+  .mc-card--thinking-live { border-left-width: 3px; }
+  .mc-card--pinned { border-top: 1px solid var(--k-select); }
+  .mc-card--pulse-hit .mc-card__hero {
+    animation: mc-pulse-hit 0.2s ease-out;
+  }
+  @keyframes mc-pulse-hit {
+    0%   { color: var(--k-bg); background: var(--k-geo); }
+    100% { color: inherit; background: transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mc-card--pulse-hit .mc-card__hero { animation: none; }
+  }
 
-  /* Expanded detail: action history + context windows */
-  .card .detail { margin-top: 6px; border-top: 1px solid var(--k-border); padding-top: 6px; cursor: default; }
-  .card .d-hd { color: var(--k-label); font-size: 9px; letter-spacing: 0.1em; margin-bottom: 3px; }
-  .actions { max-height: 150px; overflow-y: auto; font-size: 10px; }
-  .actions .act { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--k-dim); }
-  .actions .act .g { display: inline-block; width: 14px; color: var(--k-accent); }
-  .actions .act.err, .actions .act.err .g { color: var(--k-err); }
-  .actions .act .t { color: var(--k-body); }
-  .ctxrow { display: flex; gap: 3px; align-items: stretch; margin-top: 4px; }
-  .ctxseg {
+  /* Live work flow — glyph stream (not a chip grid) */
+  .mc-flow {
+    display: flex; flex-wrap: wrap; gap: 2px; align-items: center;
+    margin: 5px 0 2px; min-height: 16px;
+  }
+  .mc-flow__beat {
+    display: inline-block; min-width: 12px; text-align: center;
+    font-size: 11px; color: var(--k-accent); letter-spacing: 0;
+  }
+  .mc-flow__beat--human_turn { color: var(--k-label); }
+  .mc-flow__beat--thinking { color: var(--k-select); }
+  .mc-flow__beat--compact,
+  .mc-flow__beat--tokens,
+  .mc-flow__beat--words { color: var(--k-data); }
+  .mc-flow__beat--attachment,
+  .mc-flow__beat--scaffold,
+  .mc-flow__beat--other { color: var(--k-dim); }
+  .mc-flow__beat--err { color: var(--k-err); }
+  .mc-flow__empty { font-size: 9px; color: var(--k-dim); letter-spacing: 0.08em; }
+
+  .mc-card__pin {
+    background: transparent; border: 1px solid var(--k-border); color: var(--k-dim);
+    font: inherit; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 0 5px; cursor: pointer; margin-left: 6px;
+  }
+  .mc-card__pin.on { color: var(--k-select); border-color: var(--k-select); }
+  .mc-card__pin:hover { color: var(--k-accent); border-color: var(--k-accent); }
+
+  /* Hero = most recent pulse (mapping: mark + label cell, not buried prose) */
+  .mc-card__hero {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .mc-card__mark {
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--k-dim);
+  }
+  .mc-card--active .mc-card__mark { color: var(--k-geo); }
+  .mc-card__evt {
+    font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+    color: var(--k-accent); text-transform: uppercase;
+  }
+  .mc-card--evt-thinking .mc-card__evt,
+  .mc-card--thinking-live .mc-card__evt { color: var(--k-select); }
+  .mc-card--evt-human_turn .mc-card__evt { color: var(--k-label); }
+  .mc-card--evt-compact .mc-card__evt,
+  .mc-card--evt-tokens .mc-card__evt,
+  .mc-card--evt-words .mc-card__evt { color: var(--k-data); }
+  .mc-card--evt-tool_error .mc-card__evt,
+  .mc-card--evt-api_error .mc-card__evt { color: var(--k-err); }
+  .mc-card__file {
+    color: var(--k-dim); font-size: 11px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46%;
+  }
+  .mc-card__ago {
+    margin-left: auto; font-size: 11px; letter-spacing: 0.06em; color: var(--k-dim);
+  }
+  .mc-card--active .mc-card__ago { color: var(--k-geo); }
+
+  .mc-card__who {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 10px; color: var(--k-dim); letter-spacing: 0.04em;
+  }
+  .mc-card__slug { color: var(--k-select); font-weight: 700; }
+  .mc-card__project { color: var(--k-label); }
+  .mc-card__harness {
+    margin-left: auto; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .mc-card__title {
+    margin-top: 3px; color: var(--k-body); font-size: 11px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mc-card__modes { margin-top: 2px; font-size: 9px; letter-spacing: 0.06em; color: var(--k-dim); }
+  .mc-card__modes .mode { color: var(--k-select); }
+
+  /* Tool mix — secondary tally under the live flow */
+  .mc-tools {
+    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
+  }
+  .mc-tools__empty { display: none; }
+  .mc-chip {
+    display: inline-flex; align-items: baseline; gap: 3px;
+    border: 1px solid var(--k-border); padding: 0 4px;
+    font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--k-dim);
+  }
+  .mc-chip b { color: var(--k-data); font-weight: 400; }
+  .mc-chip--read { border-color: var(--k-select); color: var(--k-select); }
+  .mc-chip--write,
+  .mc-chip--edit { border-color: var(--k-accent); color: var(--k-accent); }
+  .mc-chip--grep_glob { border-color: var(--k-label); color: var(--k-label); }
+  .mc-chip--agent { border-color: var(--k-data); color: var(--k-data); }
+  .mc-chip--bash_git,
+  .mc-chip--bash_run,
+  .mc-chip--bash_other { border-color: var(--k-geo); color: var(--k-geo); }
+  .mc-chip--web { border-color: var(--k-select); color: var(--k-select); }
+
+  /* Errors: dedicated line under identity — never paints the card chrome */
+  .mc-card__alert {
+    margin-top: 4px; padding: 2px 6px 2px 8px;
+    border-left: 2px solid var(--k-err);
+    background: var(--k-panel);
+    font-size: 10px; color: var(--k-err); letter-spacing: 0.04em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mc-card--alert .mc-card__alert { display: block; }
+
+  .mc-card__load { margin-top: 5px; }
+  .mc-card__metrics {
+    display: flex; gap: 12px; font-size: 10px; color: var(--k-dim); flex-wrap: wrap;
+  }
+  .mc-card__metrics--secondary {
+    margin-top: 2px; gap: 10px; font-size: 9px; opacity: 0.85;
+  }
+  .mc-card__metrics b { color: var(--k-data); font-weight: 400; }
+  .mc-card__metrics .errs b { color: var(--k-err); }
+  .mc-card__metrics .burn { color: var(--k-data); }
+
+  .mc-pressure {
+    height: 3px; margin-top: 5px; background: var(--k-panel);
+    border: 1px solid var(--k-border); overflow: hidden;
+  }
+  .mc-pressure__fill { height: 100%; width: 0; background: var(--k-geo); }
+  .mc-pressure__fill--lo { background: var(--k-geo); }
+  .mc-pressure__fill--mid { background: var(--k-select); }
+  .mc-pressure__fill--hi { background: var(--k-err); }
+
+  /* Detail: pulse feed + context windows */
+  .mc-card__detail {
+    margin-top: 6px; border-top: 1px solid var(--k-border); padding-top: 6px; cursor: default;
+  }
+  .mc-card__hd {
+    color: var(--k-label); font-size: 9px; letter-spacing: 0.1em; margin-bottom: 3px;
+  }
+  .mc-feed { max-height: 150px; overflow-y: auto; font-size: 10px; }
+  .mc-act {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--k-dim);
+  }
+  .mc-act .g { display: inline-block; width: 14px; color: var(--k-accent); }
+  .mc-act .t { color: var(--k-body); }
+  .mc-act--thinking .g { color: var(--k-select); }
+  .mc-act--human_turn .g { color: var(--k-label); }
+  .mc-act--compact .g { color: var(--k-data); }
+  .mc-act--attachment .g,
+  .mc-act--scaffold .g { color: var(--k-dim); }
+  .mc-act--err,
+  .mc-act--err .g,
+  .mc-act--tool_error,
+  .mc-act--tool_error .g,
+  .mc-act--api_error,
+  .mc-act--api_error .g { color: var(--k-err); }
+
+  /* Context windows — quiet secondary under the live feed */
+  .mc-ctxrow {
+    display: flex; gap: 2px; align-items: stretch; margin-top: 4px; width: 100%;
+    opacity: 0.85;
+  }
+  .mc-ctxseg {
+    flex: 1 1 0; box-sizing: border-box; min-width: 28px;
     background: var(--k-panel); border: 1px solid var(--k-border);
-    border-left: 2px solid var(--k-select);
-    padding: 2px 6px; font-size: 9px; color: var(--k-dim); min-width: 54px;
+    border-left: 2px solid var(--k-dim);
+    padding: 2px 4px; font-size: 8px; color: var(--k-dim);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
-  .ctxseg b { color: var(--k-data); font-weight: 400; }
-  .ctxsep { color: var(--k-dim); align-self: center; }
-  .ctx-note { color: var(--k-dim); font-size: 9px; margin-top: 4px; }
+  .mc-ctxseg--cur { border-left-color: var(--k-select); border-left-width: 3px; }
+  .mc-ctxseg b { color: var(--k-data); font-weight: 400; }
+  .mc-ctxsep { display: none; }
+  .mc-ctx-note { color: var(--k-dim); font-size: 9px; margin-top: 4px; }
 
-  #empty {
-    color: var(--k-dim); padding: 40px 12px; letter-spacing: 0.08em;
-  }
+  #empty { color: var(--k-dim); padding: 40px 12px; letter-spacing: 0.08em; }
   #empty .hint { margin-top: 8px; font-size: 11px; }
 
-  /* ── Status bar ─────────────────────────────────────────────────────── */
   #statusbar {
     display: flex; align-items: center; gap: 12px;
     padding: 0 12px;
@@ -130,6 +382,12 @@
 
 <div id="main">
   <div id="harness-strip"></div>
+  <div id="mc-legend" aria-label="Mission Control legend"></div>
+  <div id="mc-idle-bar" aria-label="Idle session controls">
+    <button type="button" class="mc-idle-btn" id="mc-hide-idles" title="Hide idle sessions (pins stay)">hide idles</button>
+    <button type="button" class="mc-idle-btn" id="mc-clear-idles" title="Dismiss idle sessions until they pulse again">clear idles</button>
+    <span class="mc-idle-note">mark · pin on a card to keep it when hiding</span>
+  </div>
   <div id="cards"></div>
   <div id="empty" hidden>
     ━━━ no live sessions observed yet ━━━
@@ -147,11 +405,45 @@
 (function () {
   'use strict';
 
-  const $badge = document.getElementById('live-badge');
-  const $strip = document.getElementById('harness-strip');
-  const $cards = document.getElementById('cards');
-  const $empty = document.getElementById('empty');
-  const $sys   = document.getElementById('sys');
+  const $badge  = document.getElementById('live-badge');
+  const $strip  = document.getElementById('harness-strip');
+  const $legend = document.getElementById('mc-legend');
+  const $cards  = document.getElementById('cards');
+  const $empty  = document.getElementById('empty');
+  const $sys    = document.getElementById('sys');
+  const $hideIdles = document.getElementById('mc-hide-idles');
+  const $clearIdles = document.getElementById('mc-clear-idles');
+
+  function legendGroup(title, items, { fill } = {}) {
+    const bits = items.map(it => {
+      const sw = 'mc-legend__swatch mc-legend__swatch--' + it.swatch +
+        (fill ? ' mc-legend__swatch--fill' : '');
+      return '<span class="mc-legend__item" title="' + esc(it.mod) + '">' +
+        '<span class="' + sw + '"></span>' + esc(it.label) + '</span>';
+    }).join('');
+    return '<div class="mc-legend__group"><span class="mc-legend__hd">' + esc(title) + '</span>' + bits + '</div>';
+  }
+
+  (function paintLegend() {
+    const L = missionControlLegend();
+    $legend.innerHTML =
+      legendGroup('live', L.status) +
+      legendGroup('latest', L.events) +
+      legendGroup('tools', L.tools) +
+      legendGroup('ctx', L.pressure, { fill: true }) +
+      legendGroup('flag', L.flags);
+  })();
+
+  function loadSet(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (_) { return new Set(); }
+  }
+  function saveSet(key, set) {
+    try { localStorage.setItem(key, JSON.stringify([...set])); } catch (_) {}
+  }
 
   let snap = null;           // latest /api/active payload
   let meta = {};             // session_id → { ai_title, branch } from graph-data
@@ -159,22 +451,114 @@
   let lastPulseAt = null;
   const expanded = new Set();      // session_ids with the detail section open
   const traceCache = new Map();    // session_id → tree or 'pending' or 'error'
+  const compactWatermark = new Map(); // session_id → last seen compacts count
+  const lastHeroEvent = new Map(); // session_id → last_event for pulse-hit flash
+  let lastCardOrderKey = '';
+  let _forceFlipOnce = false; // expand/collapse reflows lane stacks
+  let hideIdles = localStorage.getItem('mc-hide-idles') === '1';
+  let pinned = loadSet('mc-pinned');
+  let dismissed = loadSet('mc-dismissed');
+
+  function syncIdleButtons() {
+    $hideIdles.classList.toggle('on', hideIdles);
+    $hideIdles.setAttribute('aria-pressed', hideIdles ? 'true' : 'false');
+  }
+  syncIdleButtons();
+
+  $hideIdles.addEventListener('click', () => {
+    hideIdles = !hideIdles;
+    localStorage.setItem('mc-hide-idles', hideIdles ? '1' : '0');
+    syncIdleButtons();
+    _forceFlipOnce = true;
+    render();
+  });
+
+  $clearIdles.addEventListener('click', () => {
+    if (!snap) return;
+    for (const id of idleIdsToClear(snap.sessions, pinned)) dismissed.add(id);
+    saveSet('mc-dismissed', dismissed);
+    _forceFlipOnce = true;
+    render();
+  });
 
   function setBadge(text, cls) { $badge.textContent = text; $badge.className = cls || ''; }
   function sys(text, isErr) { $sys.textContent = text; $sys.className = isErr ? 'err' : ''; }
 
-  function lastTool(s) {
-    if (!s.last_tool) return '';
-    const t = s.last_tool;
-    const whereBits = t.where ? String(t.where).replace(/\\/g, '/').split('/').pop() : (t.why || '');
-    return '<div class="toolline"><span class="sym">▸</span> <span class="tool">' + esc(t.tool || '?') +
-      '</span> <span class="where">· ' + esc(String(whereBits).slice(0, 48)) + '</span></div>';
+  function reducedMotionMq() {
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)'); }
+    catch (_) { return null; }
+  }
+
+  /** FLIP movers + enter for new cards / reflow (skip ago-only ticks). */
+  function playCardMotion(prevRects) {
+    if (!mcMotionAllowed(reducedMotionMq())) return;
+    const nextRects = captureMcCardRects($cards);
+    const plan = mcCardFlipPlan(prevRects, nextRects);
+    if (!plan.length) return;
+    for (const step of plan) {
+      const el = $cards.querySelector('.mc-card[data-sid="' + CSS.escape(step.sid) + '"]');
+      if (!el) continue;
+      if (step.enter) {
+        el.classList.add('mc-card--enter');
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            el.classList.add('mc-card--enter-active');
+            setTimeout(function () {
+              el.classList.remove('mc-card--enter', 'mc-card--enter-active');
+            }, MC_CARD_MOVE_MS + 20);
+          });
+        });
+        continue;
+      }
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + step.dx + 'px,' + step.dy + 'px)';
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          el.style.transition = 'transform ' + (MC_CARD_MOVE_MS / 1000) + 's ease';
+          el.style.transform = '';
+          setTimeout(function () {
+            el.style.transition = '';
+          }, MC_CARD_MOVE_MS + 20);
+        });
+      });
+    }
+  }
+
+  /** Live context-pressure meter — only when a real absolute window exists. */
+  function pressureBar(s) {
+    if (!s.last_tokens) return '';
+    const win = (s.last_tokens.input || 0) + (s.last_tokens.cache_read || 0);
+    if (win <= 0) return '';
+    const p = contextPressure(s.last_tokens.input, s.last_tokens.cache_read);
+    const pct = Math.round(p * 100);
+    const tier = pressureTier(p);
+    return '<div class="mc-pressure" title="context ' + pct + '%"><div class="' +
+      pressureFillClasses(tier) + '" style="width:' + pct + '%"></div></div>';
+  }
+
+  /** Invalidate cached ContextTree when live compact count rises; revive dismissed actives. */
+  function ingestSnap(d) {
+    if (!d || !Array.isArray(d.sessions)) { snap = d; return; }
+    let dismissedChanged = false;
+    for (const s of d.sessions) {
+      const prev = compactWatermark.get(s.session_id) ?? 0;
+      const cur = s.compacts || 0;
+      if (cur > prev && traceCache.has(s.session_id)) traceCache.delete(s.session_id);
+      compactWatermark.set(s.session_id, cur);
+      if (s.status === 'active' && dismissed.has(s.session_id)) {
+        dismissed.delete(s.session_id);
+        dismissedChanged = true;
+      }
+    }
+    if (dismissedChanged) saveSet('mc-dismissed', dismissed);
+    snap = d;
   }
 
   // ── Action history (recent_actions ring from /api/active) ─────────────
   const ACT_GLYPH = {
     tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
     permission: '⚙', mode_shift: '⚙', api_error: '⊘',
+    thinking: '◉', attachment: '▣', scaffold: '⬚',
   };
 
   function actLine(a) {
@@ -182,7 +566,9 @@
     let body = '';
     if (a.type === 'tool_call') {
       const where = a.where ? String(a.where).replace(/\\/g, '/').split('/').pop() : (a.why || '');
-      body = '<span class="t">' + esc(a.tool || '?') + '</span> ' + esc(String(where).slice(0, 44));
+      const key = a.key || a.tool || '?';
+      body = '<span class="t" title="' + esc(a.tool || key) + '">' + esc(key) + '</span> ' +
+        esc(String(where).slice(0, 44));
     } else if (a.type === 'tool_error') {
       body = '<span class="t">' + esc(a.tool || '?') + '</span> failed';
     } else if (a.type === 'api_error') {
@@ -193,14 +579,20 @@
       body = a.type.replace('_', ' ') + ' → <span class="t">' + esc(a.mode || '?') + '</span>';
     } else if (a.type === 'compact') {
       body = 'context compacted';
+    } else if (a.type === 'thinking') {
+      body = 'thinking';
+    } else if (a.type === 'attachment') {
+      body = 'attachment' + (a.subtype ? ' · <span class="t">' + esc(a.subtype) + '</span>' : '');
+    } else if (a.type === 'scaffold') {
+      body = 'scaffold' + (a.content_preview ? ' · ' + esc(String(a.content_preview).slice(0, 40)) : '');
     }
-    return '<div class="act' + (a.error ? ' err' : '') + '"><span class="g">' + g + '</span>' + body + '</div>';
+    return '<div class="' + actionItemClasses(a) + '"><span class="g">' + g + '</span>' + body + '</div>';
   }
 
-  // ── Compact context-window strip (on-demand /api/trace) ───────────────
+  // ── Proportional context-window strip (on-demand /api/trace) ───────────
   function ctxStrip(sessionId, harness) {
     if (!harnessInfo[harness]?.capabilities?.trace) {
-      return '<div class="ctx-note">' + esc(harness) + ' provides no context trace</div>';
+      return '<div class="mc-ctx-note">' + esc(harness) + ' provides no context trace</div>';
     }
     const cached = traceCache.get(sessionId);
     if (cached === undefined) {
@@ -209,29 +601,131 @@
         .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
         .then(tree => { traceCache.set(sessionId, tree); render(); })
         .catch(() => { traceCache.set(sessionId, 'error'); render(); });
-      return '<div class="ctx-note">loading context windows…</div>';
+      return '<div class="mc-ctx-note">loading context windows…</div>';
     }
-    if (cached === 'pending') return '<div class="ctx-note">loading context windows…</div>';
-    if (cached === 'error')   return '<div class="ctx-note">trace unavailable</div>';
+    if (cached === 'pending') return '<div class="mc-ctx-note">loading context windows…</div>';
+    if (cached === 'error')   return '<div class="mc-ctx-note">trace unavailable</div>';
 
-    const segs = cached.segments || [];
-    if (!segs.length) return '<div class="ctx-note">no segments</div>';
-    return '<div class="ctxrow">' + segs.map((g, i) => {
-      const turns = g.user_turns + g.assistant_turns;
-      const tok = g.tokens.output + g.tokens.cache_read;
-      return '<div class="ctxseg">w' + (i + 1) + ' · <b>' + turns + 't</b>' +
-        (tok ? ' · ' + fmtTok(tok) : '') +
-        (g.subagent_count ? ' · ↳' + g.subagent_count : '') + '</div>';
-    }).join('<span class="ctxsep">⟲</span>') + '</div>';
+    const raw = cached.segments || [];
+    if (!raw.length) return '<div class="mc-ctx-note">no segments</div>';
+    const model = contextStripSegments(raw);
+    return '<div class="mc-ctxrow">' + model.map((seg, i) => {
+      const bits = [];
+      if (seg.badges && seg.badges.subagents) bits.push('↳' + seg.badges.subagents);
+      if (seg.badges && seg.badges.thinking > 2) bits.push('◉' + seg.badges.thinking);
+      if (seg.badges && seg.badges.branches > 1) bits.push('⎇' + seg.badges.branches);
+      return (i ? '<span class="mc-ctxsep">⟲</span>' : '') +
+        '<div class="' + ctxSegClasses(seg) +
+        '" style="width:' + seg.pct + '%;border-left-color:' + esc(seg.color) + '"' +
+        (seg.tool ? ' title="' + esc(seg.tool) + '"' : '') + '>' +
+        'w' + (seg.index + 1) + ' · <b>' + seg.turns + 't</b>' +
+        (seg.tok ? ' · ' + fmtTok(seg.tok) : '') +
+        (bits.length ? ' · ' + bits.join(' ') : '') +
+        '</div>';
+    }).join('') + '</div>';
   }
 
   function render() {
     if (!snap) return;
     const nowMs = Date.now();
 
-    // harness rollup strip + capability badges (registry via /api/harnesses)
-    $strip.innerHTML = Object.entries(snap.by_harness).map(([h, v]) => {
-      const caps = harnessInfo[h]?.capabilities || {};
+    const filtered = filterMissionSessions(snap.sessions, { hideIdles, pinned, dismissed });
+    const harnessOrder = Object.keys(snap.by_harness || {});
+    // Prefer registry order when present
+    const regOrder = Object.keys(harnessInfo);
+    const orderHint = regOrder.length ? regOrder : harnessOrder;
+    const lanes = groupSessionsByHarness(filtered, orderHint);
+    $empty.hidden = filtered.length > 0;
+
+    const orderKey = mcCardOrderKey(filtered);
+    const shouldMotion = orderKey !== lastCardOrderKey;
+    const prevRects = (shouldMotion || _forceFlipOnce) ? captureMcCardRects($cards) : null;
+    _forceFlipOnce = false;
+    lastCardOrderKey = orderKey;
+
+    function metricSpan(item) {
+      const val = item.fmt === 'tok' ? fmtTok(item.value) : item.value;
+      const cls = item.err ? ' class="errs"' : (item.burn ? ' class="burn"' : '');
+      return '<span' + cls + '><b>' + val + '</b> ' + esc(item.label) + '</span>';
+    }
+
+    function renderCard(s) {
+      const sec = Math.max(0, Math.round((nowMs - s.last_seen) / 1000));
+      const m = meta[s.session_id] || {};
+      const title = m.ai_title || s.last_preview || '';
+      const isOpen = expanded.has(s.session_id);
+      const isPinned = pinned.has(s.session_id);
+      const modeBits = [];
+      if (s.last_mode)            modeBits.push('mode <span class="mode">' + esc(s.last_mode) + '</span>');
+      if (s.last_permission_mode) modeBits.push('perm <span class="mode">' + esc(s.last_permission_mode) + '</span>');
+      const pulseHit = lastHeroEvent.has(s.session_id)
+        && lastHeroEvent.get(s.session_id) !== s.last_event;
+      lastHeroEvent.set(s.session_id, s.last_event);
+      let cardCls = sessionCardClasses(s, { expanded: isOpen });
+      if (isPinned) cardCls += ' mc-card--pinned';
+      if (pulseHit) cardCls += ' mc-card--pulse-hit';
+      const alertText = sessionAlertText(s);
+      const hero = sessionRecencyHero(s);
+      let flow = sessionPulseFlow(s.recent_actions, 12);
+      // Hero can be thinking/tokens/words while flow is action-only — append a live tip beat.
+      if (s.last_event === 'thinking' || s.last_event === 'tokens' || s.last_event === 'words' || s.last_event === 'chirp') {
+        const tip = sessionPulseFlow([{ type: s.last_event }], 1)[0];
+        if (tip) flow = flow.concat([tip]);
+      }
+      const chips = sessionToolChips(s, { max: 5 });
+      const { primary, secondary } = sessionMetricSplit(s);
+      const primaryLoad = primary.filter(item => !item.ago);
+
+      return '<div class="' + cardCls + '" data-sid="' + esc(s.session_id) +
+        '" data-evt="' + esc(s.last_event || '') + '">' +
+        '<div class="mc-card__hero">' +
+          '<span class="mc-card__mark">' + hero.mark + ' ' +
+            (hero.status === 'active' ? 'ACTIVE' : 'IDLE') + '</span>' +
+          '<span class="mc-card__evt">' + esc(hero.label) + '</span>' +
+          (hero.detail ? '<span class="mc-card__file">' + esc(hero.detail) + '</span>' : '') +
+          '<span class="mc-card__ago">' + fmtAgo(sec) + '</span>' +
+          '<button type="button" class="mc-card__pin' + (isPinned ? ' on' : '') +
+            '" data-pin="' + esc(s.session_id) + '" title="Mark / pin — keep when hiding idles">' +
+            (isPinned ? 'pinned' : 'mark') + '</button>' +
+        '</div>' +
+        '<div class="mc-flow" title="recent work flow">' +
+          (flow.length
+            ? flow.map(f => '<span class="' + f.cls + '"' +
+              (f.key ? ' title="' + esc(f.key) + '"' : '') + '>' + f.glyph + '</span>').join('')
+            : '<span class="mc-flow__empty">awaiting pulses</span>') +
+        '</div>' +
+        '<div class="mc-card__who">' +
+          '<span class="mc-card__slug">' + esc(s.slug) + '</span>' +
+          '<span class="mc-card__project">' + esc(s.project || '—') +
+            (m.branch ? ' · ' + esc(m.branch) : '') + '</span>' +
+        '</div>' +
+        (title ? '<div class="mc-card__title">' + esc(String(title).slice(0, 80)) + '</div>' : '') +
+        (modeBits.length ? '<div class="mc-card__modes">' + modeBits.join(' · ') + '</div>' : '') +
+        (alertText ? '<div class="mc-card__alert">' + esc(alertText) + '</div>' : '') +
+        (chips.length
+          ? '<div class="mc-tools">' + chips.map(c => '<span class="' + c.cls + '">' +
+            esc(c.key) + '<b>' + c.count + '</b></span>').join('') + '</div>'
+          : '') +
+        '<div class="mc-card__load">' +
+          '<div class="mc-card__metrics">' + primaryLoad.map(metricSpan).join('') + '</div>' +
+          (secondary.length
+            ? '<div class="mc-card__metrics mc-card__metrics--secondary">' +
+              secondary.map(metricSpan).join('') + '</div>'
+            : '') +
+          pressureBar(s) +
+        '</div>' +
+        (isOpen ?
+          '<div class="mc-card__detail">' +
+            '<div class="mc-card__hd">◆ WORK FLOW</div>' +
+            '<div class="mc-feed">' + (s.recent_actions || []).map(actLine).join('') + '</div>' +
+            '<div class="mc-card__hd" style="margin-top:5px">◆ CONTEXT (quiet)</div>' +
+            ctxStrip(s.session_id, s.harness) +
+          '</div>' : '') +
+      '</div>';
+    }
+
+    $cards.innerHTML = lanes.map(lane => {
+      const caps = harnessInfo[lane.harness]?.capabilities || {};
       const badge = c => '<span class="cap">' + c + '</span>';
       const capBits = [
         caps.tokens ? badge('tok') : 'tok',
@@ -239,80 +733,59 @@
         caps.branches ? badge('⎇') : '⎇',
         caps.subagent_count ? badge('↳') : '↳',
       ].join(' · ');
-      return '<div class="harness-cell"><div class="hname">' + esc(h) + '</div>' +
-        '<div class="hstats"><span class="on">' + v.active + '▲</span> / ' + v.sessions + ' ses · ' +
-        '<b>' + v.tool_calls + '</b> tools · <b>' + fmtTok(v.tokens_work) + '</b> tok</div>' +
-        '<div class="hcaps">' + capBits + '</div></div>';
+      const activeN = lane.sessions.filter(s => s.status === 'active').length;
+      const boardTools = lane.sessions.reduce((n, s) => n + (s.tool_calls || 0), 0);
+      const boardTok = lane.sessions.reduce((n, s) => n + (s.tokens_work || 0), 0);
+      return '<section class="mc-lane" data-harness="' + esc(lane.harness) + '">' +
+        '<header class="mc-lane__hd">' +
+          '<span class="mc-lane__name">' + esc(lane.harness) + '</span>' +
+          '<span class="mc-lane__stats"><span class="on">' + activeN + '▲</span> / ' +
+            lane.sessions.length + ' · <b>' + boardTools + '</b> tools · <b>' +
+            fmtTok(boardTok) + '</b></span>' +
+          '<span class="mc-lane__caps">' + capBits + '</span>' +
+        '</header>' +
+        '<div class="mc-lane__cards">' +
+          lane.sessions.map(renderCard).join('') +
+        '</div></section>';
     }).join('');
 
-    // session cards — active first, then by recency; seconds tick stays local
-    $empty.hidden = snap.sessions.length > 0;
-    const ordered = [...snap.sessions].sort((a, b) =>
-      (a.status === b.status ? b.last_seen - a.last_seen : (a.status === 'active' ? -1 : 1)));
+    if (prevRects) playCardMotion(prevRects);
 
-    $cards.innerHTML = ordered.map(s => {
-      const sec = Math.max(0, Math.round((nowMs - s.last_seen) / 1000));
-      const m = meta[s.session_id] || {};
-      const title = m.ai_title || s.last_preview || '';
-      const isOpen = expanded.has(s.session_id);
-      const modeBits = [];
-      if (s.last_mode)            modeBits.push('mode <span class="mode">' + esc(s.last_mode) + '</span>');
-      if (s.last_permission_mode) modeBits.push('perm <span class="mode">' + esc(s.last_permission_mode) + '</span>');
+    for (const el of $cards.querySelectorAll('.mc-feed')) el.scrollTop = el.scrollHeight;
 
-      return '<div class="card ' + s.status + '" data-sid="' + esc(s.session_id) + '">' +
-        '<div class="row1">' +
-          '<span class="status">' + (s.status === 'active' ? '● ACTIVE' : '○ IDLE') + '</span>' +
-          '<span class="slug">' + esc(s.slug) + '</span>' +
-          '<span class="project">' + esc(s.project || '—') + (m.branch ? ' · ' + esc(m.branch) : '') + '</span>' +
-          '<span class="harness">' + esc(s.harness) + '</span>' +
-        '</div>' +
-        (title ? '<div class="titleline">' + esc(String(title).slice(0, 80)) + '</div>' : '') +
-        lastTool(s) +
-        (modeBits.length ? '<div class="modes">' + modeBits.join(' · ') + '</div>' : '') +
-        (s.last_api_error ? '<div class="apierr">⊘ ' + esc(s.last_api_error.message || 'api error') +
-          (s.last_api_error.code ? ' [' + esc(s.last_api_error.code) + ']' : '') + '</div>' : '') +
-        '<div class="metrics">' +
-          '<span><b>' + s.tool_calls + '</b> tools</span>' +
-          (s.tool_errors ? '<span class="errs"><b>' + s.tool_errors + '</b> err</span>' : '') +
-          (s.api_errors ? '<span class="errs"><b>' + s.api_errors + '</b> api</span>' : '') +
-          '<span><b>' + fmtTok(s.tokens_work) + '</b> tok</span>' +
-          (s.burn_rate_per_min ? '<span class="burn">' + fmtTok(s.burn_rate_per_min) + '/min</span>' : '') +
-          '<span><b>' + s.human_turns + '</b> ⌨</span>' +
-          (s.compacts ? '<span><b>' + s.compacts + '</b> ⟲</span>' : '') +
-          '<span class="ago">' + fmtAgo(sec) + ' ago</span>' +
-        '</div>' +
-        (isOpen ?
-          '<div class="detail">' +
-            '<div class="d-hd">◆ RECENT ACTIONS</div>' +
-            '<div class="actions">' + (s.recent_actions || []).map(actLine).join('') + '</div>' +
-            '<div class="d-hd" style="margin-top:5px">◆ CONTEXT WINDOWS</div>' +
-            ctxStrip(s.session_id, s.harness) +
-          '</div>' : '') +
-      '</div>';
-    }).join('');
-
-    // keep open action feeds pinned to the newest entry
-    for (const el of $cards.querySelectorAll('.actions')) el.scrollTop = el.scrollHeight;
-
+    const shown = filtered.length;
+    const idleN = snap.sessions.filter(s => s.status === 'idle').length;
     const a = snap.totals.active, t = snap.totals.sessions;
-    sys('observing ' + t + ' session' + (t === 1 ? '' : 's') + ' · ' + a + ' active' +
+    sys('lanes ' + lanes.length + ' · board ' + shown + '/' + t + ' · ' + a + ' active · ' + idleN + ' idle' +
+        (hideIdles ? ' · hiding idles' : '') +
+        (pinned.size ? ' · ' + pinned.size + ' pinned' : '') +
         (lastPulseAt ? ' · last pulse ' + fmtAgo(Math.round((nowMs - lastPulseAt) / 1000)) + ' ago' : ''));
   }
 
-  // expand/collapse detail on card click (links/scroll areas excluded)
+  // pin / expand — pin stops propagation so the card does not toggle open
   $cards.addEventListener('click', e => {
-    if (e.target.closest('.detail')) return;
-    const card = e.target.closest('.card');
+    const pinBtn = e.target.closest('[data-pin]');
+    if (pinBtn) {
+      e.stopPropagation();
+      const sid = pinBtn.getAttribute('data-pin');
+      if (pinned.has(sid)) pinned.delete(sid); else pinned.add(sid);
+      saveSet('mc-pinned', pinned);
+      render();
+      return;
+    }
+    if (e.target.closest('.mc-card__detail')) return;
+    const card = e.target.closest('.mc-card');
     if (!card) return;
     const sid = card.dataset.sid;
     if (expanded.has(sid)) expanded.delete(sid); else expanded.add(sid);
+    _forceFlipOnce = true;
     render();
   });
 
   async function fetchActive() {
     try {
       const r = await fetch('/api/active');
-      snap = await r.json();
+      ingestSnap(await r.json());
       render();
     } catch { sys('cannot reach /api/active — is serve.mjs running?', true); }
   }
@@ -344,7 +817,7 @@
   sys('connecting to /events…');
   connectEvents({
     handlers: {
-      now:     d => { if (d) { snap = d; lastPulseAt = Date.now(); render(); } },
+      now:     d => { if (d) { ingestSnap(d); lastPulseAt = Date.now(); render(); } },
       status:  (d, e) => { if (e.data === 'rebuilding') setBadge('◌ building…', 'dim'); },
       updated: () => { setBadge('⬤ LIVE', ''); fetchMeta(); },
       error:   (d, e) => {
@@ -356,10 +829,31 @@
     onStatus: s => setBadge(s === 'open' ? '⬤ LIVE' : '◌ reconnecting', s === 'open' ? '' : 'dim'),
   });
 
+  /** Ago-only tick — do not remount lanes (preserves scroll/focus). */
+  function tickAgo() {
+    if (!snap) return;
+    const nowMs = Date.now();
+    const byId = new Map((snap.sessions || []).map(s => [s.session_id, s]));
+    for (const el of $cards.querySelectorAll('.mc-card[data-sid]')) {
+      const s = byId.get(el.getAttribute('data-sid'));
+      if (!s) continue;
+      const ago = el.querySelector('.mc-card__ago');
+      if (ago) ago.textContent = fmtAgo(Math.max(0, Math.round((nowMs - s.last_seen) / 1000)));
+    }
+    const shown = $cards.querySelectorAll('.mc-card').length;
+    const idleN = snap.sessions.filter(s => s.status === 'idle').length;
+    const a = snap.totals.active, t = snap.totals.sessions;
+    const lanesN = $cards.querySelectorAll('.mc-lane').length;
+    sys('lanes ' + lanesN + ' · board ' + shown + '/' + t + ' · ' + a + ' active · ' + idleN + ' idle' +
+        (hideIdles ? ' · hiding idles' : '') +
+        (pinned.size ? ' · ' + pinned.size + ' pinned' : '') +
+        (lastPulseAt ? ' · last pulse ' + fmtAgo(Math.round((nowMs - lastPulseAt) / 1000)) + ' ago' : ''));
+  }
+
   fetchActive();
   fetchMeta();
   fetchHarnesses();
-  setInterval(render, 1000);          // local seconds tick
+  setInterval(tickAgo, 1000);         // local seconds tick (no DOM remount)
   setInterval(fetchActive, 30_000);   // safety re-sync (status flips happen server-side)
 }());
 </script>

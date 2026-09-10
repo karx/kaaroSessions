@@ -947,6 +947,325 @@ test('contextPressure — context tokens vs window, clamped 0..1', async () => {
   assert.equal(contextPressure(300_000, 0, 200_000), 1, 'clamped');
 });
 
+// ── Mission Control visual encoding (CSS class ontology) ─────────────────────
+
+test('pressureTier — lo / mid / hi thresholds for mc-pressure fills', async () => {
+  const { pressureTier } = await import('../experience/client-core.mjs');
+  assert.equal(pressureTier(null), null);
+  assert.equal(pressureTier(undefined), null);
+  assert.equal(pressureTier(0), 'lo');
+  assert.equal(pressureTier(0.54), 'lo');
+  assert.equal(pressureTier(0.55), 'mid');
+  assert.equal(pressureTier(0.84), 'mid');
+  assert.equal(pressureTier(0.85), 'hi');
+  assert.equal(pressureTier(1), 'hi');
+});
+
+test('sessionCardClasses — encodes status, last pulse, alert, pressure, open', async () => {
+  const { sessionCardClasses } = await import('../experience/client-core.mjs');
+  const base = {
+    status: 'active',
+    last_event: 'tool_call',
+    tool_errors: 0,
+    api_errors: 0,
+    last_api_error: null,
+    last_tokens: { input: 100_000, cache_read: 80_000 },
+  };
+  const cls = sessionCardClasses(base);
+  assert.ok(cls.includes('mc-card'));
+  assert.ok(cls.includes('mc-card--active'));
+  assert.ok(cls.includes('mc-card--evt-tool_call'));
+  assert.equal(cls.includes('mc-card--pressure-'), false, 'pressure stays on the meter fill only');
+  assert.equal(cls.includes('mc-card--alert'), false);
+  assert.equal(cls.includes('mc-card--open'), false);
+
+  const idleErr = sessionCardClasses({
+    status: 'idle',
+    last_event: 'api_error',
+    tool_errors: 0,
+    api_errors: 1,
+    last_api_error: { message: 'quota' },
+    last_tokens: null,
+  }, { expanded: true });
+  assert.ok(idleErr.includes('mc-card--idle'));
+  assert.ok(idleErr.includes('mc-card--evt-api_error'));
+  assert.ok(idleErr.includes('mc-card--alert'), 'alert flags the error zone — not a full-card chrome wipe');
+  assert.ok(idleErr.includes('mc-card--open'));
+  assert.equal(idleErr.includes('mc-card--pressure-'), false);
+
+  const think = sessionCardClasses({
+    status: 'active',
+    last_event: 'thinking',
+    tool_errors: 0,
+    api_errors: 0,
+    last_api_error: null,
+    last_tokens: { input: 10_000, cache_read: 0 },
+  });
+  assert.ok(think.includes('mc-card--evt-thinking'));
+  assert.ok(think.includes('mc-card--thinking-live'));
+  assert.equal(think.includes('mc-card--pressure-'), false);
+
+  const unknown = sessionCardClasses({
+    status: 'active',
+    last_event: 'mystery!!',
+    tool_errors: 2,
+    api_errors: 0,
+    last_api_error: null,
+    last_tokens: null,
+  });
+  assert.ok(unknown.includes('mc-card--evt-other'), 'unsafe last_event → other');
+  assert.ok(unknown.includes('mc-card--alert'), 'tool_errors → alert');
+});
+
+test('sessionAlertText — human-readable error line for triage scan', async () => {
+  const { sessionAlertText } = await import('../experience/client-core.mjs');
+  assert.equal(sessionAlertText(null), null);
+  assert.equal(sessionAlertText({ tool_errors: 0, api_errors: 0 }), null);
+  assert.equal(
+    sessionAlertText({ last_api_error: { message: 'quota exceeded', code: 'rate_limit' } }),
+    '⊘ quota exceeded [rate_limit]',
+  );
+  assert.equal(
+    sessionAlertText({ tool_errors: 2, api_errors: 1, last_api_error: null }),
+    '⊘ 2 tool err · 1 api err',
+  );
+  assert.equal(
+    sessionAlertText({
+      tool_errors: 3,
+      last_api_error: { message: 'boom', code: null },
+    }),
+    '⊘ boom',
+    'explicit api message wins over counts',
+  );
+});
+
+test('sessionMetricSplit — primary scan vs secondary counts', async () => {
+  const { sessionMetricSplit } = await import('../experience/client-core.mjs');
+  const { primary, secondary } = sessionMetricSplit({
+    tool_calls: 12,
+    tool_errors: 1,
+    api_errors: 0,
+    tokens_work: 9000,
+    burn_rate_per_min: 400,
+    human_turns: 3,
+    compacts: 1,
+    thinking_count: 5,
+    attachments: 2,
+    scaffolds: 0,
+  });
+  assert.deepEqual(primary.map(m => m.key), ['tools', 'tool_errors', 'tokens', 'burn', 'human', 'ago']);
+  assert.ok(primary.some(m => m.key === 'tool_errors' && m.err));
+  assert.deepEqual(secondary.map(m => m.key), ['compacts', 'thinking', 'attachments']);
+});
+
+test('sessionRecencyHero — most-recent pulse is the card headline', async () => {
+  const { sessionRecencyHero } = await import('../experience/client-core.mjs');
+  const tool = sessionRecencyHero({
+    status: 'active',
+    last_event: 'tool_call',
+    last_tool: { key: 'read', tool: 'Read', where: 'D:/x/a.mjs', why: null },
+  });
+  assert.equal(tool.status, 'active');
+  assert.equal(tool.mark, '●');
+  assert.equal(tool.event, 'tool_call');
+  assert.equal(tool.label, 'read', 'canonical key, not raw tool name');
+  assert.equal(tool.detail, 'a.mjs');
+
+  const bash = sessionRecencyHero({
+    status: 'active',
+    last_event: 'tool_call',
+    last_tool: { key: 'bash_run', tool: 'Bash', where: null, why: 'npm test -- --watch' },
+  });
+  assert.equal(bash.label, 'bash_run');
+  assert.equal(bash.detail, 'npm test -- --watch', 'why fallback when no where');
+
+  const think = sessionRecencyHero({ status: 'active', last_event: 'thinking', last_tool: null });
+  assert.equal(think.label, 'thinking');
+  assert.equal(think.detail, null);
+
+  const idle = sessionRecencyHero({ status: 'idle', last_event: 'words', last_preview: 'hello' });
+  assert.equal(idle.mark, '○');
+  assert.equal(idle.label, 'words');
+
+  const other = sessionRecencyHero({ status: 'active', last_event: 'mystery' });
+  assert.equal(other.event, 'other');
+  assert.equal(other.label, 'other');
+});
+
+test('sessionToolChips — mapping-style key×count cells, hottest first', async () => {
+  const { sessionToolChips } = await import('../experience/client-core.mjs');
+  assert.deepEqual(sessionToolChips(null), []);
+  assert.deepEqual(sessionToolChips({ tools_by_key: {} }), []);
+
+  const chips = sessionToolChips({
+    tools_by_key: { read: 12, edit: 3, bash_run: 5, other: 1, write: 2 },
+  }, { max: 4 });
+  assert.equal(chips.length, 4);
+  assert.deepEqual(chips.map(c => c.key), ['read', 'bash_run', 'edit', 'write']);
+  assert.deepEqual(chips.map(c => c.count), [12, 5, 3, 2]);
+  assert.ok(chips.every(c => c.cls === 'mc-chip mc-chip--' + c.key));
+});
+
+test('mcCardFlipPlan — reorder deltas + enter flag for new cards', async () => {
+  const { mcCardFlipPlan, MC_CARD_MOVE_MS } = await import('../experience/client-core.mjs');
+  assert.ok(MC_CARD_MOVE_MS > 0 && MC_CARD_MOVE_MS <= 250);
+
+  const prev = new Map([
+    ['a', { left: 0, top: 0, width: 100, height: 40 }],
+    ['b', { left: 0, top: 50, width: 100, height: 40 }],
+  ]);
+  const next = new Map([
+    ['b', { left: 0, top: 0, width: 100, height: 40 }],   // moved up
+    ['a', { left: 0, top: 50, width: 100, height: 40 }],  // moved down
+    ['c', { left: 0, top: 100, width: 100, height: 40 }], // new
+  ]);
+  const plan = mcCardFlipPlan(prev, next);
+  const by = Object.fromEntries(plan.map(p => [p.sid, p]));
+  assert.equal(by.b.dx, 0);
+  assert.equal(by.b.dy, 50, 'invert: was at 50, now at 0 → +50 translate');
+  assert.equal(by.a.dy, -50);
+  assert.equal(by.c.enter, true);
+  assert.equal(by.c.dx, 0);
+  assert.equal(by.b.enter, false);
+
+  assert.deepEqual(mcCardFlipPlan(prev, prev), [], 'no motion when rects unchanged');
+});
+
+test('mcCardOrderKey — includes status so active↔idle triggers motion', async () => {
+  const { mcCardOrderKey } = await import('../experience/client-core.mjs');
+  assert.equal(mcCardOrderKey([{ session_id: 'a', status: 'active' }, { session_id: 'b', status: 'idle' }]), 'a:active|b:idle');
+  assert.notEqual(
+    mcCardOrderKey([{ session_id: 'a', status: 'active' }]),
+    mcCardOrderKey([{ session_id: 'a', status: 'idle' }]),
+  );
+  assert.equal(mcCardOrderKey([]), '');
+  assert.equal(mcCardOrderKey(null), '');
+});
+
+test('actionItemClasses — encodes pulse type + error flag', async () => {
+  const { actionItemClasses } = await import('../experience/client-core.mjs');
+  assert.equal(actionItemClasses({ type: 'thinking' }), 'mc-act mc-act--thinking');
+  assert.equal(actionItemClasses({ type: 'tool_error', error: true }), 'mc-act mc-act--tool_error mc-act--err');
+  assert.equal(actionItemClasses({ type: 'attachment', subtype: 'file' }), 'mc-act mc-act--attachment');
+  assert.equal(actionItemClasses({ type: 'Weird Type' }), 'mc-act mc-act--other');
+  assert.equal(actionItemClasses(null), 'mc-act mc-act--other');
+});
+
+test('pressureFillClasses / ctxSegClasses — fill and strip modifiers', async () => {
+  const { pressureFillClasses, ctxSegClasses } = await import('../experience/client-core.mjs');
+  assert.equal(pressureFillClasses('lo'), 'mc-pressure__fill mc-pressure__fill--lo');
+  assert.equal(pressureFillClasses('hi'), 'mc-pressure__fill mc-pressure__fill--hi');
+  assert.equal(pressureFillClasses(null), 'mc-pressure__fill');
+  assert.equal(ctxSegClasses({ isCurrent: false }), 'mc-ctxseg');
+  assert.equal(ctxSegClasses({ isCurrent: true }), 'mc-ctxseg mc-ctxseg--cur');
+});
+
+test('missionControlLegend — pulse + state grammar entries for the /now legend strip', async () => {
+  const { missionControlLegend } = await import('../experience/client-core.mjs');
+  const L = missionControlLegend();
+  assert.ok(Array.isArray(L.status) && L.status.length >= 2);
+  assert.ok(L.status.every(x => x.swatch && x.label && x.mod));
+  assert.deepEqual(L.status.map(x => x.mod).sort(), ['active', 'idle']);
+
+  const evtMods = L.events.map(x => x.mod);
+  for (const need of ['tool_call', 'thinking', 'human_turn', 'compact', 'tool_error', 'api_error']) {
+    assert.ok(evtMods.includes(need), 'events include ' + need);
+  }
+  assert.ok(L.events.every(x => x.swatch && x.label && !String(x.mod).startsWith('evt-')));
+
+  assert.deepEqual(L.pressure.map(x => x.mod), ['lo', 'mid', 'hi']);
+  assert.ok(L.status.every(x => /active|idle/i.test(x.label)));
+  const alertFlag = L.flags.find(x => x.mod === 'alert');
+  assert.ok(alertFlag);
+  assert.equal(alertFlag.label, 'errors');
+  assert.ok(L.flags.some(x => x.mod === 'thinking-live'));
+  assert.ok(Array.isArray(L.tools) && L.tools.some(t => t.mod === 'read'));
+  for (const need of ['tokens', 'words', 'permission', 'mode_shift']) {
+    assert.ok(L.events.some(e => e.mod === need), 'legend covers rail event ' + need);
+  }
+});
+
+test('mcMotionAllowed — respects prefers-reduced-motion', async () => {
+  const { mcMotionAllowed } = await import('../experience/client-core.mjs');
+  assert.equal(mcMotionAllowed({ matches: false }), true);
+  assert.equal(mcMotionAllowed({ matches: true }), false);
+  assert.equal(mcMotionAllowed(null), true);
+});
+
+test('filterMissionSessions — hide idles, pins survive, dismissed until active', async () => {
+  const { filterMissionSessions } = await import('../experience/client-core.mjs');
+  const sessions = [
+    { session_id: 'a', status: 'active' },
+    { session_id: 'b', status: 'idle' },
+    { session_id: 'c', status: 'idle' },
+    { session_id: 'd', status: 'idle' },
+  ];
+  assert.equal(filterMissionSessions(sessions, {}).length, 4);
+
+  const hidden = filterMissionSessions(sessions, {
+    hideIdles: true,
+    pinned: new Set(['c']),
+  });
+  assert.deepEqual(hidden.map(s => s.session_id), ['a', 'c'], 'pinned idle stays when hide on');
+
+  const cleared = filterMissionSessions(sessions, {
+    dismissed: new Set(['b', 'd']),
+  });
+  assert.deepEqual(cleared.map(s => s.session_id), ['a', 'c']);
+
+  // Dismissed session that goes active returns.
+  const back = filterMissionSessions(
+    [{ session_id: 'b', status: 'active' }, { session_id: 'd', status: 'idle' }],
+    { dismissed: new Set(['b', 'd']) },
+  );
+  assert.deepEqual(back.map(s => s.session_id), ['b']);
+});
+
+test('sessionPulseFlow — last N feed glyphs for live work stream', async () => {
+  const { sessionPulseFlow } = await import('../experience/client-core.mjs');
+  assert.deepEqual(sessionPulseFlow(null), []);
+  const actions = [
+    { type: 'tool_call', key: 'read' },
+    { type: 'tool_call', key: 'edit' },
+    { type: 'human_turn' },
+    { type: 'compact' },
+    { type: 'tool_error', error: true },
+  ];
+  const flow = sessionPulseFlow(actions, 3);
+  assert.equal(flow.length, 3);
+  assert.deepEqual(flow.map(f => f.type), ['human_turn', 'compact', 'tool_error']);
+  assert.ok(flow.every(f => f.glyph && f.cls.includes('mc-flow__beat')));
+  assert.equal(flow[2].cls.includes('mc-flow__beat--err'), true);
+});
+
+test('idleIdsToClear — idle sessions not pinned', async () => {
+  const { idleIdsToClear } = await import('../experience/client-core.mjs');
+  const ids = idleIdsToClear(
+    [
+      { session_id: 'a', status: 'active' },
+      { session_id: 'b', status: 'idle' },
+      { session_id: 'c', status: 'idle' },
+    ],
+    new Set(['c']),
+  );
+  assert.deepEqual(ids, ['b']);
+});
+
+test('groupSessionsByHarness — clear lanes, active-first within harness', async () => {
+  const { groupSessionsByHarness } = await import('../experience/client-core.mjs');
+  assert.deepEqual(groupSessionsByHarness(null), []);
+  const lanes = groupSessionsByHarness([
+    { session_id: '1', harness: 'grok', status: 'idle', last_seen: 10 },
+    { session_id: '2', harness: 'claude-code', status: 'active', last_seen: 30 },
+    { session_id: '3', harness: 'claude-code', status: 'idle', last_seen: 40 },
+    { session_id: '4', harness: 'grok', status: 'active', last_seen: 20 },
+  ], ['claude-code', 'grok', 'opencode']);
+  assert.deepEqual(lanes.map(l => l.harness), ['claude-code', 'grok']);
+  assert.deepEqual(lanes[0].sessions.map(s => s.session_id), ['2', '3'], 'active before idle');
+  assert.deepEqual(lanes[1].sessions.map(s => s.session_id), ['4', '1']);
+  assert.equal(lanes.find(l => l.harness === 'opencode'), undefined, 'empty harnesses omitted');
+});
+
 test('sessionLegend — newest-first distinct sessions with latest context pressure', async () => {
   const { sessionLegend } = await import('../experience/client-core.mjs');
   const ring = [
@@ -1041,7 +1360,8 @@ test('dominantTool — highest-count [name, count] entry, shared by contextStrip
 });
 
 test('contextStripSegments — proportional by token weight, colored by dominant tool', async () => {
-  const { contextStripSegments } = await import('../experience/client-core.mjs');
+  const { contextStripSegments, MIN_STRIP_PCT } = await import('../experience/client-core.mjs');
+  assert.equal(MIN_STRIP_PCT, 5, 'floor matches proportional-strip skill / panel');
   assert.deepEqual(contextStripSegments(null), []);
   assert.deepEqual(contextStripSegments([]), []);
 
@@ -1054,10 +1374,47 @@ test('contextStripSegments — proportional by token weight, colored by dominant
   assert.equal(segs[0].color, TOOL_COLORS.Write);
   assert.ok(segs[0].pct > segs[1].pct, 'bigger token weight → bigger share');
   assert.equal(segs[0].turns, 3);
+  assert.equal(segs[0].index, 0);
+  assert.equal(segs[1].index, 1);
 
   const noSummary = contextStripSegments([{ tokens: { output: 10, cache_read: 0 } }], '#123456');
   assert.equal(noSummary[0].tool, null);
   assert.equal(noSummary[0].color, '#123456', 'falls back to session color when no dominant tool');
+});
+
+test('contextStripSegments — tiny window still gets MIN_STRIP_PCT floor', async () => {
+  const { contextStripSegments, MIN_STRIP_PCT } = await import('../experience/client-core.mjs');
+  const segs = contextStripSegments([
+    { tokens: { output: 10000, cache_read: 0 }, tool_summary: { Read: 1 } },
+    { tokens: { output: 1, cache_read: 0 }, tool_summary: { Bash: 1 } },
+  ]);
+  assert.equal(segs[1].pct, MIN_STRIP_PCT);
+});
+
+test('contextStripSegments — isCurrent + badges from segment fields', async () => {
+  const { contextStripSegments } = await import('../experience/client-core.mjs');
+  const segs = contextStripSegments([
+    {
+      tokens: { output: 100, cache_read: 0 },
+      tool_summary: { Read: 2 },
+      compact_trigger: 'manual',
+      subagent_count: 2,
+      thinking_count: 5,
+      branches: ['main', 'feat'],
+    },
+    {
+      tokens: { output: 200, cache_read: 0 },
+      tool_summary: { Write: 3 },
+      compact_trigger: null,
+      subagent_count: 0,
+      thinking_count: 1,
+      branches: ['main'],
+    },
+  ]);
+  assert.equal(segs[0].isCurrent, false);
+  assert.deepEqual(segs[0].badges, { subagents: 2, thinking: 5, branches: 2 });
+  assert.equal(segs[1].isCurrent, true, 'open window = compact_trigger null');
+  assert.deepEqual(segs[1].badges, { subagents: 0, thinking: 1, branches: 1 });
 });
 
 test('buildShareCardData — assembles a session node into card data (single source for preview/share/download)', async () => {

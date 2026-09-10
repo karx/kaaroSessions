@@ -34,13 +34,19 @@ function getEntry(state, data, now) {
       last_tool: null,
       tool_calls: 0,
       tool_errors: 0,
+      tools_by_key: Object.create(null), // Canonical Action Key → count
       tokens: { input: 0, output: 0, cache_create: 0, cache_read: 0 },
+      last_tokens: null,        // latest absolute window { input, cache_read, ts } — not cumulative
       recent_work: [],          // [{ t, work }] pruned to burnWindowMs
       words: 0,
       last_preview: null,
       human_turns: 0,
       last_human_ts: null,
       compacts: 0,
+      thinking_count: 0,
+      last_thinking_ts: null,
+      attachments: 0,
+      scaffolds: 0,
       recent_actions: [],       // ring of the last RECENT_ACTIONS_MAX actions
       last_permission_mode: null,
       last_mode: null,
@@ -77,7 +83,7 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
   if (!e.project && data.project) e.project = data.project; // backfill (opencode part pulses lack it)
 
   switch (event) {
-    case 'tool_call':
+    case 'tool_call': {
       e.tool_calls++;
       e.last_tool = {
         tool: data.tool ?? null,
@@ -86,9 +92,12 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
         why: data.why ?? null,
         ts: now,
       };
+      const key = data.key || 'other';
+      e.tools_by_key[key] = (e.tools_by_key[key] || 0) + 1;
       pushAction(e, { type: 'tool_call', ts: now, tool: data.tool ?? null,
         key: data.key ?? null, where: data.where ?? null, why: data.why ?? null });
       break;
+    }
 
     case 'tool_error':
       e.tool_errors++;
@@ -100,6 +109,13 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       e.tokens.output       += data.output       || 0;
       e.tokens.cache_create += data.cache_create || 0;
       e.tokens.cache_read   += data.cache_read   || 0;
+      // Absolute window for pressure — skip synthetic / empty windows so
+      // tokenless harnesses do not show a permanent 0% meter.
+      const winIn = data.input || 0;
+      const winCr = data.cache_read || 0;
+      if (!data.synthetic && (winIn > 0 || winCr > 0)) {
+        e.last_tokens = { input: winIn, cache_read: winCr, ts: now };
+      }
       const work = (data.output || 0) + (data.cache_create || 0);
       if (work > 0) e.recent_work.push({ t: now, work });
       pruneRecentWork(e, now, thresholds.burnWindowMs);
@@ -120,7 +136,32 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
 
     case 'compact':
       e.compacts++;
+      e.last_tokens = null; // window reset — hide pressure until next real tokens
       pushAction(e, { type: 'compact', ts: now });
+      break;
+
+    case 'thinking':
+      // Count + live rail only — do not flood the 50-cap feed with thinking rows.
+      e.thinking_count++;
+      e.last_thinking_ts = now;
+      break;
+
+    case 'attachment':
+      e.attachments++;
+      pushAction(e, {
+        type: 'attachment', ts: now,
+        subtype: data.subtype ?? null,
+      });
+      break;
+
+    case 'scaffold':
+      e.scaffolds++;
+      pushAction(e, {
+        type: 'scaffold', ts: now,
+        content_preview: data.content_preview
+          ? String(data.content_preview).slice(0, 80)
+          : null,
+      });
       break;
 
     case 'permission':
@@ -189,7 +230,9 @@ export function snapshotActive(state, now, overrides = {}) {
       last_tool: e.last_tool,
       tool_calls: e.tool_calls,
       tool_errors: e.tool_errors,
+      tools_by_key: { ...e.tools_by_key },
       tokens: { ...e.tokens },
+      last_tokens: e.last_tokens ? { ...e.last_tokens } : null,
       tokens_work,
       burn_rate_per_min: burnRate(e, now, th.burnWindowMs),
       words: e.words,
@@ -197,6 +240,10 @@ export function snapshotActive(state, now, overrides = {}) {
       human_turns: e.human_turns,
       last_human_ts: e.last_human_ts,
       compacts: e.compacts,
+      thinking_count: e.thinking_count,
+      last_thinking_ts: e.last_thinking_ts,
+      attachments: e.attachments,
+      scaffolds: e.scaffolds,
       recent_actions: [...e.recent_actions],
       last_permission_mode: e.last_permission_mode,
       last_mode: e.last_mode,

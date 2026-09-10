@@ -92,7 +92,7 @@ Legend: **Y** = this sink receives it today. **—** = produced upstream but thi
 | NR kind | Pulse `event` | `data.key` / notes | MC | Ticker | Beat ring | Audio |
 |---|---|---|---|---|---|---|
 | `tool_use` | `tool_call` | Canonical Action Key from `nr.tool + nr.category` | Y | Y (tool + file) | Y | Y (unless filter/`off`) |
-| `tokens` | `tokens` | — | Y | — | Y | Y |
+| `tokens` | `tokens` | MC also stamps `last_tokens` (latest absolute `input`+`cache_read`, overwrite) for context pressure | Y | — | Y | Y |
 | `assistant_turn` and `capabilities.tokens === false` | `tokens` | `synthetic: true`, `output ≈ content_length/4` | Y | — | Y | Y |
 | `content_block` text ≥ 3 words | `words` | preview, word_count | Y | Y (quoted preview) | Y | Y |
 | `content_block` text < 3 words | `chirp` | preview, word_count | Y (counts as words) | — (explicitly null) | Y | Y |
@@ -105,12 +105,12 @@ Legend: **Y** = this sink receives it today. **—** = produced upstream but thi
 | `context_reset` | `compact` | Y | Y | Y | Y |
 | `permission_mode` | `permission` | Y | Y | Y | Y |
 | `mode_shift` | `mode_shift` | Y | Y | Y | Y |
-| `attachment` | `attachment` | last_seen | — | Y | Y |
-| `scaffold` | `scaffold` | last_seen | — | Y | Y |
+| `attachment` | `attachment` | Y (count + ring subtype) | — | Y | Y |
+| `scaffold` | `scaffold` | Y (count + ring preview) | — | Y | Y |
 | `tool_result` (`error: true`) | `tool_error` | Y | Y | Y | Y |
 | `tool_result` (ok) | `tool_result` | last_seen | — | — | — |
 | `api_error` | `api_error` | Y | Y | Y | Y |
-| `content_block` thinking | `thinking` | last_seen | — | Y | Y |
+| `content_block` thinking | `thinking` | Y (count + ring, no text) | — | Y | Y |
 | `content_block` unclassified `block_type` / `unknown_record` | `unknown` | last_seen | — | — | — |
 | `assistant_turn` when tokens **are** a capability | `silent` | — | — | — | — |
 
