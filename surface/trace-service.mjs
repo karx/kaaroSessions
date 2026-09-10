@@ -71,7 +71,7 @@ export function createTraceService() {
         if (cached && cached.fingerprint === fingerprint) return cached.tree;
       }
 
-      const { records, traceOpts = {} } = harness.readSessionRecords(filePath);
+      const { records, traceOpts = {} } = harness.readSessionRecords(filePath, sessionId);
       const nrs = harness.adapter(records);
 
       let reconOpts = { ...traceOpts };

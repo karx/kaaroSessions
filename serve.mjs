@@ -116,20 +116,22 @@ function handleWatchEvent(harnessId, rootDir, filename) {
 
 let watchCount = 0;
 for (const harness of getEnabledHarnesses()) {
-  const root = harness.roots[0];
-  if (!root) continue;
-  try {
-    if (!fs.existsSync(root)) {
-      console.warn(`[${harness.id}] root not found — skipped: ${root}`);
-      continue;
+  const existingRoots = (harness.roots || []).filter(r => r && fs.existsSync(r));
+  const rootsToWatch = existingRoots.filter((r, i) => !existingRoots.some((other, j) => i !== j && r.startsWith(other + path.sep)));
+  if (!rootsToWatch.length && harness.roots?.[0]) {
+    console.warn(`[${harness.id}] root not found — skipped: ${harness.roots[0]}`);
+    continue;
+  }
+  for (const root of rootsToWatch) {
+    try {
+      fs.watch(root, { recursive: true }, (_, filename) => {
+        handleWatchEvent(harness.id, root, filename);
+      });
+      console.log(`Watching [${harness.id}]: ${root}`);
+      watchCount++;
+    } catch (e) {
+      console.warn(`[${harness.id}] watch unavailable: ${e.message}`);
     }
-    fs.watch(root, { recursive: true }, (_, filename) => {
-      handleWatchEvent(harness.id, root, filename);
-    });
-    console.log(`Watching [${harness.id}]: ${root}`);
-    watchCount++;
-  } catch (e) {
-    console.warn(`[${harness.id}] watch unavailable: ${e.message}`);
   }
 }
 

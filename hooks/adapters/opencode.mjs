@@ -101,6 +101,7 @@ export function recordsToNormalized(records) {
         kind: 'session_meta', harness: HARNESS, ts: toIso(rec.time?.created),
         ai_title: rec.title || null,
         cwd: rec.directory || null,
+        version: rec.version || undefined,
       });
       continue;
     }

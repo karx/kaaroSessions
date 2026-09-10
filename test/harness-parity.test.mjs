@@ -20,6 +20,7 @@ import { recordsToNormalized as ccToNorm } from '../hooks/adapters/claude-code.m
 import { recordsToNormalized as piToNorm } from '../hooks/adapters/pi.mjs';
 import { recordsToNormalized as agToNorm } from '../hooks/adapters/antigravity.mjs';
 import { recordsToNormalized as grokToNorm } from '../hooks/adapters/grok.mjs';
+import { recordsToNormalized as ocToNorm } from '../hooks/adapters/opencode.mjs';
 import { EVENT_TYPES } from '../experience/audio/event-registry.mjs';
 import { reduceSession } from '../hooks/session-reducer.mjs';
 import { enrichSession } from '../hooks/enrich-session.mjs';
@@ -76,6 +77,7 @@ const ADAPTERS = {
   'pi':           piToNorm,
   'antigravity':  agToNorm,
   'grok':         grokToNorm,
+  'opencode':     ocToNorm,
 };
 
 function partialMatch(actual, expect) {
@@ -211,7 +213,6 @@ test('harness parity — antigravity', () => {
 // they exercise every populate path the harness format offers.
 
 import { getHarness } from '../hooks/registry.mjs';
-import { recordsToNormalized as ocToNorm } from '../hooks/adapters/opencode.mjs';
 import { recordsToNormalized as cpToNorm } from '../hooks/adapters/copilot.mjs';
 import { parseGrokRecords } from '../hooks/analyzers/analyze-grok.mjs';
 

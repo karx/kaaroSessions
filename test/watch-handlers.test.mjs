@@ -111,7 +111,35 @@ test('processWatchFilename — opencode session info json', () => {
   assert.equal(r.ctx.session_id, 'ses_4a89582bbffe03xj4Y14Qtss1q');
   assert.equal(r.ctx.slug, '4a89582b');
   assert.equal(r.ctx.read_mode, 'json'); // whole-file JSON, not JSONL tail
+  assert.equal(r.ctx.version_marker, '1.0');
   assert.equal(r.rebuildArg, null);
+});
+
+test('processWatchFilename — opencode storage/ prefixed path matches and strips cleanly', () => {
+  const r = processWatchFilename(
+    'opencode',
+    'storage/session/global/ses_4a89582bbffe03xj4Y14Qtss1q.json',
+    ROOT,
+  );
+  assert.ok(r);
+  assert.equal(r.ctx.session_id, 'ses_4a89582bbffe03xj4Y14Qtss1q');
+  assert.equal(r.ctx.read_mode, 'json');
+  assert.equal(r.ctx.version_marker, '1.0');
+});
+
+test('processWatchFilename — opencode.db and opencode.db-wal emit sqlite read_mode', () => {
+  const r1 = processWatchFilename('opencode', 'opencode.db', ROOT);
+  assert.ok(r1);
+  assert.equal(r1.ctx.harness, 'opencode');
+  assert.equal(r1.ctx.read_mode, 'sqlite');
+  assert.equal(r1.ctx.version_marker, '1.18');
+  assert.equal(r1.rebuildArg, null);
+
+  const r2 = processWatchFilename('opencode', 'opencode.db-wal', ROOT);
+  assert.ok(r2);
+  assert.equal(r2.ctx.harness, 'opencode');
+  assert.equal(r2.ctx.read_mode, 'sqlite');
+  assert.equal(r2.ctx.version_marker, '1.18');
 });
 
 test('processWatchFilename — opencode message json carries session id from dir', () => {

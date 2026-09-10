@@ -243,24 +243,63 @@ export function locateGrokSession(sessionId, root = GROK_SESSIONS_ROOT) {
 /**
  * @param {string} sessionId — opencode info id (ses_…)
  * @param {string} [root] — opencode storage root
- * @returns {{ filePath: string, projectId: null, sessionId: string }|null}
+ * @returns {{ filePath: string, projectId: string|null, sessionId: string, directory?: string|null, format?: string }|null}
  */
 export function locateOpencodeSession(sessionId, root = OPENCODE_STORAGE_ROOT) {
   if (!sessionId) return null;
-  const sessionRoot = path.join(root, 'session');
-  if (!fs.existsSync(sessionRoot)) return null;
+
+  // 1. Check SQLite database (opencode >= 1.18.x)
+  let dbPath = null;
+  if (root.endsWith('.db') && fs.existsSync(root)) {
+    dbPath = root;
+  } else if (fs.existsSync(path.join(root, 'opencode.db'))) {
+    dbPath = path.join(root, 'opencode.db');
+  } else if (fs.existsSync(path.join(path.dirname(root), 'opencode.db'))) {
+    dbPath = path.join(path.dirname(root), 'opencode.db');
+  }
+
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (DatabaseSync && dbPath) {
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        let row = db.prepare('SELECT id, project_id, directory FROM session WHERE id = ?').get(sessionId);
+        if (!row) {
+          const search = sessionId.startsWith('ses_') ? `${sessionId}%` : `ses_${sessionId}%`;
+          row = db.prepare('SELECT id, project_id, directory FROM session WHERE id LIKE ? ORDER BY time_updated DESC LIMIT 1').get(search);
+        }
+        if (row) {
+          return {
+            filePath: dbPath,
+            projectId: row.project_id || null,
+            sessionId: row.id,
+            directory: row.directory || null,
+            format: 'sqlite',
+          };
+        }
+      } finally {
+        db.close();
+      }
+    } catch {}
+  }
+
+  // 2. Check JSON trees (opencode <= 1.0.x)
+  const sessionRoot = fs.existsSync(path.join(root, 'session'))
+    ? path.join(root, 'session')
+    : (fs.existsSync(path.join(root, 'storage', 'session')) ? path.join(root, 'storage', 'session') : null);
+  if (!sessionRoot) return null;
 
   for (const bucket of fs.readdirSync(sessionRoot)) {
     const candidate = path.join(sessionRoot, bucket, `${sessionId}.json`);
     if (fs.existsSync(candidate)) {
-      return { filePath: candidate, projectId: null, sessionId };
+      return { filePath: candidate, projectId: null, sessionId, format: 'json' };
     }
   }
 
   // 8-char slug prefix (graph/Mission Control/DAW slug = session_id.slice(0, 8))
   for (const bucket of fs.readdirSync(sessionRoot)) {
     const found = findByPrefix(path.join(sessionRoot, bucket), sessionId, '.json');
-    if (found) return { filePath: found.filePath, projectId: null, sessionId: found.id };
+    if (found) return { filePath: found.filePath, projectId: null, sessionId: found.id, format: 'json' };
   }
   return null;
 }

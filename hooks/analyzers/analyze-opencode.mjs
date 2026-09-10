@@ -24,9 +24,25 @@ import {
   deriveAntigravityProjectId as deriveProjectIdFromPath,
   deriveAntigravityLabel as deriveLabelFromPath,
 } from '../helpers/antigravity-helpers.mjs';
-import { OPENCODE_STORAGE_ROOT } from '../harness-paths.mjs';
+import {
+  OPENCODE_STORAGE_ROOT,
+  OPENCODE_ROOT,
+  OPENCODE_DB_PATH,
+} from '../harness-paths.mjs';
+import {
+  OPENCODE_VERSION_MARKERS,
+  OPENCODE_SUPPORTED_VERSIONS,
+  detectOpencodeVersionMarker,
+} from '../helpers/opencode-helpers.mjs';
 
-export { OPENCODE_STORAGE_ROOT };
+export {
+  OPENCODE_STORAGE_ROOT,
+  OPENCODE_ROOT,
+  OPENCODE_DB_PATH,
+  OPENCODE_VERSION_MARKERS,
+  OPENCODE_SUPPORTED_VERSIONS,
+  detectOpencodeVersionMarker,
+};
 
 const OUT_FILE = path.join(process.cwd(), 'sessions-data.json');
 
@@ -44,8 +60,14 @@ function listJsonFiles(dir) {
   return entries.filter(f => f.endsWith('.json')).map(f => path.join(dir, f));
 }
 
+function getSqlite() {
+  const { DatabaseSync } = process.getBuiltinModule?.('node:sqlite') ?? {};
+  return DatabaseSync || null;
+}
+
 /**
  * Assemble one session: info + messages (chronological) with parts embedded.
+ * Used for opencode <= 1.0.x (V1 JSON storage layout).
  * @returns {{ info: object, records: object[], sizeBytes: number }}
  */
 export function readOpencodeSession(storageRoot, infoPath) {
@@ -74,9 +96,97 @@ export function readOpencodeSession(storageRoot, infoPath) {
   return { info, records: [info, ...messages], sizeBytes };
 }
 
-export function analyzeOpencodeSession(storageRoot, infoPath) {
-  const { info, records, sizeBytes } = readOpencodeSession(storageRoot, infoPath);
-  if (!info?.id) return null;
+/**
+ * Read one session from SQLite database.
+ * Used for opencode >= 1.18.x (V2 SQLite layout).
+ * @param {string} dbPath
+ * @param {string} sessionId
+ * @returns {{ info: object, records: object[], sizeBytes: number }|null}
+ */
+export function readOpencodeDbSession(dbPath, sessionId) {
+  const DatabaseSync = getSqlite();
+  if (!DatabaseSync || !fs.existsSync(dbPath)) return null;
+
+  let db;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    let sessionRow = db.prepare('SELECT * FROM session WHERE id = ?').get(sessionId);
+    if (!sessionRow) {
+      const search = sessionId.startsWith('ses_') ? `${sessionId}%` : `ses_${sessionId}%`;
+      sessionRow = db.prepare('SELECT * FROM session WHERE id LIKE ? ORDER BY time_updated DESC LIMIT 1').get(search);
+    }
+    if (!sessionRow) return null;
+
+    const info = {
+      id: sessionRow.id,
+      version: sessionRow.version,
+      projectID: sessionRow.project_id,
+      directory: sessionRow.directory,
+      title: sessionRow.title,
+      time: {
+        created: sessionRow.time_created,
+        updated: sessionRow.time_updated,
+      },
+      summary: {
+        additions: sessionRow.summary_additions,
+        deletions: sessionRow.summary_deletions,
+        files: sessionRow.summary_files,
+      },
+    };
+
+    const messages = db.prepare('SELECT * FROM message WHERE session_id = ? ORDER BY time_created ASC').all(sessionRow.id);
+    const msgRecords = [];
+    for (const m of messages) {
+      let data = {};
+      try { data = JSON.parse(m.data || '{}'); } catch {}
+      const msgObj = {
+        id: m.id,
+        sessionID: m.session_id,
+        role: data.role,
+        time: {
+          created: m.time_created,
+          completed: data.time?.completed || m.time_updated,
+        },
+        modelID: data.modelID,
+        providerID: data.providerID,
+        tokens: data.tokens,
+        finish: data.finish,
+        path: data.path,
+      };
+
+      const parts = db.prepare('SELECT * FROM part WHERE message_id = ? ORDER BY id ASC').all(m.id);
+      msgObj._parts = parts.map(p => {
+        let pData = {};
+        try { pData = JSON.parse(p.data || '{}'); } catch {}
+        return {
+          id: p.id,
+          sessionID: p.session_id,
+          messageID: p.message_id,
+          ...pData,
+        };
+      });
+      msgRecords.push(msgObj);
+    }
+
+    const sizeBytes = fs.statSync(dbPath).size;
+    return { info, records: [info, ...msgRecords], sizeBytes };
+  } catch {
+    return null;
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+
+export function analyzeOpencodeSession(storageRoot, infoPath, opts = {}) {
+  let sessionData;
+  if (opts.dbPath || infoPath?.endsWith?.('.db') || opts.sessionId) {
+    const dbPath = opts.dbPath || infoPath;
+    sessionData = readOpencodeDbSession(dbPath, opts.sessionId);
+  } else {
+    sessionData = readOpencodeSession(storageRoot, infoPath);
+  }
+  if (!sessionData?.info?.id) return null;
+  const { info, records, sizeBytes } = sessionData;
 
   const session = reduceSession(recordsToNormalized(records), {
     session_id:    info.id,
@@ -102,15 +212,68 @@ export function analyzeOpencodeSession(storageRoot, infoPath) {
 }
 
 export function scanOpencodeSessions(storageRoot = OPENCODE_STORAGE_ROOT) {
-  const sessionRoot = path.join(storageRoot, 'session');
-  return walkSessions(sessionRoot, 'opencode', function* (entries) {
-    for (const bucket of dirNames(entries)) {
-      for (const infoPath of listJsonFiles(path.join(sessionRoot, bucket))) {
-        if (!path.basename(infoPath).startsWith('ses_')) continue;
-        yield {
-          id: `${bucket}/${path.basename(infoPath)}`,
-          analyze: () => analyzeOpencodeSession(storageRoot, infoPath),
-        };
+  let dbPath = null;
+  if (storageRoot.endsWith('.db') && fs.existsSync(storageRoot)) {
+    dbPath = storageRoot;
+  } else if (fs.existsSync(path.join(storageRoot, 'opencode.db'))) {
+    dbPath = path.join(storageRoot, 'opencode.db');
+  } else if (fs.existsSync(path.join(path.dirname(storageRoot), 'opencode.db'))) {
+    dbPath = path.join(path.dirname(storageRoot), 'opencode.db');
+  }
+
+  const sessionRoot = fs.existsSync(path.join(storageRoot, 'session'))
+    ? path.join(storageRoot, 'session')
+    : (fs.existsSync(path.join(storageRoot, 'storage', 'session'))
+      ? path.join(storageRoot, 'storage', 'session')
+      : null);
+
+  if (!sessionRoot && !dbPath) {
+    return null;
+  }
+
+  const walkRoot = sessionRoot || path.dirname(dbPath);
+  const seenIds = new Set();
+
+  return walkSessions(walkRoot, 'opencode', function* (entries) {
+    // 1. Scan SQLite sessions (opencode >= 1.18.x)
+    const DatabaseSync = getSqlite();
+    if (DatabaseSync && dbPath) {
+      let db;
+      try {
+        db = new DatabaseSync(dbPath, { readOnly: true });
+        const rows = db.prepare('SELECT id, time_updated FROM session ORDER BY time_updated DESC').all();
+        for (const r of rows) {
+          if (!r?.id || seenIds.has(r.id)) continue;
+          seenIds.add(r.id);
+          yield {
+            id: `sqlite/${r.id}`,
+            analyze: () => analyzeOpencodeSession(storageRoot, dbPath, { dbPath, sessionId: r.id }),
+          };
+        }
+      } catch (err) {
+        console.warn(`[opencode] sqlite scan error: ${err.message}`);
+      } finally {
+        try { db?.close(); } catch {}
+      }
+    }
+
+    // 2. Scan JSON sessions (opencode <= 1.0.x)
+    if (sessionRoot) {
+      const bucketEntries = sessionRoot === walkRoot ? entries : (function() {
+        try { return fs.readdirSync(sessionRoot, { withFileTypes: true }); } catch { return []; }
+      })();
+      for (const bucket of dirNames(bucketEntries)) {
+        for (const infoPath of listJsonFiles(path.join(sessionRoot, bucket))) {
+          const base = path.basename(infoPath);
+          if (!base.startsWith('ses_')) continue;
+          const sessId = base.replace(/\.json$/, '');
+          if (seenIds.has(sessId)) continue;
+          seenIds.add(sessId);
+          yield {
+            id: `${bucket}/${base}`,
+            analyze: () => analyzeOpencodeSession(storageRoot, infoPath),
+          };
+        }
       }
     }
   }, { sourceDir: storageRoot });

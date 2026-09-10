@@ -82,7 +82,7 @@ function makeToolPart(over = {}, stateOver = {}) {
 
 // ── session info ──────────────────────────────────────────────────────────────
 
-test('opencode session info → session_meta with ai_title + cwd', () => {
+test('opencode session info → session_meta with ai_title + cwd + version', () => {
   const nrs = recordsToNormalized([makeInfo()]);
   assert.equal(nrs.length, 1);
   const m = nrs[0];
@@ -90,6 +90,7 @@ test('opencode session info → session_meta with ai_title + cwd', () => {
   assert.equal(m.harness, 'opencode');
   assert.equal(m.ai_title, 'Minecraft Bridge Session');
   assert.equal(m.cwd, 'D:\\src\\mineKaaro\\bun-ai-minecraft');
+  assert.equal(m.version, '1.0.201');
   assert.equal(m.ts, new Date(1766698155332).toISOString());
 });
 
@@ -236,6 +237,7 @@ test('full session reduces: tokens, tools, file_ops, errors', () => {
   });
 
   assert.equal(session.harness, 'opencode');
+  assert.equal(session.version, '1.0.201');
   assert.equal(session.user_turns, 1);
   assert.equal(session.assistant_turns, 1);
   assert.equal(session.tool_calls, 3);
