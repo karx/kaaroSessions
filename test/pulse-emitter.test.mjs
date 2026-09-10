@@ -135,6 +135,259 @@ test('json read_mode — whole-file parse, dedupe by size+mtime signature', () =
   });
 });
 
+// opencode splits a session across session/message/part JSON trees; only the
+// session info doc carries `directory`. A live tool_call pulse comes from a
+// bare part file (storage/part/<msgId>/prt_*.json), which carries neither
+// `directory` nor `path.cwd` — see hooks/TRACE-opencode-sessions.md. Without
+// resolving the session's directory from its info doc, every opencode
+// tool_call pulse ships with project: null, breaking project-hex highlight
+// and per-project pitch/pan in 14-pulse-audio.js (playPulse still fires, but
+// unattributed — not first-class).
+test('json read_mode — opencode tool part with no in-body directory resolves project via the registry (live data shape)', () => {
+  withTempDir((root) => {
+    mkdirSync(join(root, 'session', 'bucketA'), { recursive: true });
+    mkdirSync(join(root, 'part', 'msg_readcall'), { recursive: true });
+    writeFileSync(
+      join(root, 'session', 'bucketA', 'ses_projparity.json'),
+      JSON.stringify({ id: 'ses_projparity', directory: 'D:\\src\\myproj', time: { created: 1, updated: 2 } }),
+      'utf8',
+    );
+    const partPath = join(root, 'part', 'msg_readcall', 'prt_readcall.json');
+    writeFileSync(partPath, JSON.stringify({
+      id: 'prt_readcall', sessionID: 'ses_projparity', messageID: 'msg_readcall',
+      type: 'tool', tool: 'read',
+      state: { status: 'completed', input: { filePath: 'a.mjs' }, time: { start: 1, end: 2 } },
+    }), 'utf8');
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    // ctxFromPath's shape for a part/<msgId>/… change: session identity is unknown
+    // from the path alone (it lives inside the JSON body).
+    const ctx = { harness: 'opencode', session_id: null, slug: null,
+      project_id: null, project_label: null, read_mode: 'json' };
+
+    emitter.tailAndPulse(partPath, ctx);
+    const toolCalls = hub.events.filter(e => e.event === 'tool_call');
+    assert.equal(toolCalls.length, 1);
+    assert.equal(toolCalls[0].data.project, 'myproj',
+      'tool_call pulse must carry the project label so the graph/audio can attribute it');
+  });
+});
+
+// The sqlite live-tail path (opencode >= 1.18.x) is a High-Water Mark (HWM)
+// cursor over (time_updated, rowid) on the `part`/`message` tables — see
+// RFC-opencode-cdc-tracking.md. On its FIRST touch for a given db, the reader
+// bootstraps its cursor to the tables' current max (time_updated, rowid), so
+// whatever was already on disk at that moment is treated as historical (the
+// offline scan already captured it) and does not double-fire as a live pulse.
+// Only rows written AFTER that bootstrap point cross the HWM and pulse.
+function opencodeDbSchema(db) {
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY, directory TEXT, project_id TEXT, time_updated INTEGER
+    );
+    CREATE TABLE part (
+      id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+      time_created INTEGER, time_updated INTEGER, data TEXT
+    );
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY, session_id TEXT,
+      time_created INTEGER, time_updated INTEGER, data TEXT
+    );
+  `);
+}
+
+function insertPart(db, { id, messageId, sessionId, t, status = 'completed', tool = 'read', input = { filePath: 'main.js' } }) {
+  db.prepare(
+    'INSERT OR REPLACE INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, messageId, sessionId, t, t, JSON.stringify({
+    type: 'tool', tool, state: { status, input, time: { start: t, end: t } },
+  }));
+}
+
+test('sqlite read_mode — opencode.db part insertion emits tool_call pulse with project label', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec(`
+      INSERT INTO session (id, directory, project_id, time_updated)
+      VALUES ('ses_sqlpulse', 'D:\\\\src\\\\sqlpulseproj', 'proj_sql', 100);
+    `);
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = {
+      harness: 'opencode', session_id: 'ses_sqlpulse', slug: 'sqlpulse',
+      project_id: null, project_label: null, read_mode: 'sqlite',
+    };
+
+    // First tick bootstraps the HWM cursor (nothing new yet).
+    emitter.tailAndPulse(dbPath, ctx);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 0);
+
+    // A real tool call lands after the reader is watching.
+    const db2 = new DatabaseSync(dbPath);
+    insertPart(db2, { id: 'prt_sql1', messageId: 'msg_1', sessionId: 'ses_sqlpulse', t: 101 });
+    db2.close();
+
+    emitter.tailAndPulse(dbPath, ctx);
+    const toolCalls = hub.events.filter(e => e.event === 'tool_call');
+    assert.equal(toolCalls.length, 1);
+    assert.equal(toolCalls[0].data.tool, 'read');
+    assert.equal(toolCalls[0].data.project, 'sqlpulseproj');
+    emitter.closeSqliteReaders(); // release the file handle before temp-dir cleanup (Windows)
+  });
+});
+
+test('sqlite read_mode — rows already on disk at bootstrap are historical, not re-emitted as live pulses', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_old', 'D:\\\\x', 'p', 50);");
+    // This row predates the watcher ever touching the db (e.g. server restart
+    // mid-history) — the offline scan already accounted for it.
+    insertPart(db, { id: 'prt_old', messageId: 'msg_old', sessionId: 'ses_old', t: 60 });
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: null, slug: null,
+      project_id: null, project_label: null, read_mode: 'sqlite' };
+
+    emitter.tailAndPulse(dbPath, ctx);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 0,
+      'pre-existing rows at first watch must not replay as live pulses');
+    emitter.closeSqliteReaders();
+  });
+});
+
+// Regression test for the bug this replaces: `SELECT ... ORDER BY rowid DESC
+// LIMIT 5` silently and permanently dropped anything beyond the 5 most
+// recent rows. A burst of parallel/rapid tool calls (routine in agentic
+// coding sessions) must all reach the SSE stream, in commit order.
+test('sqlite read_mode — a burst of >5 tool parts all pulse, in order, with no drops', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_burst', 'D:\\\\src\\\\burstproj', 'p', 100);");
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: 'ses_burst', slug: 'burst',
+      project_id: null, project_label: null, read_mode: 'sqlite' };
+
+    emitter.tailAndPulse(dbPath, ctx); // bootstrap
+
+    const N = 12; // > the old LIMIT 5
+    const db2 = new DatabaseSync(dbPath);
+    for (let i = 0; i < N; i++) {
+      insertPart(db2, { id: `prt_burst${i}`, messageId: 'msg_burst', sessionId: 'ses_burst', t: 200 + i, input: { filePath: `file${i}.js` } });
+    }
+    db2.close();
+
+    emitter.tailAndPulse(dbPath, ctx); // single watch tick for the whole burst
+    const toolCalls = hub.events.filter(e => e.event === 'tool_call');
+    assert.equal(toolCalls.length, N, `all ${N} burst tool calls must pulse — got ${toolCalls.length}`);
+    // Commit order preserved.
+    assert.deepEqual(toolCalls.map(e => e.data.where.replace(/\\/g, '/')), Array.from({ length: N }, (_, i) => `file${i}.js`));
+    emitter.closeSqliteReaders();
+  });
+});
+
+test('sqlite read_mode — a part updated pending → completed pulses exactly once (terminal-gate + cursor agree)', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_state', 'D:\\\\x', 'p', 10);");
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: 'ses_state', slug: 'state',
+      project_id: null, project_label: null, read_mode: 'sqlite' };
+    emitter.tailAndPulse(dbPath, ctx); // bootstrap
+
+    const db2 = new DatabaseSync(dbPath);
+    insertPart(db2, { id: 'prt_transition', messageId: 'msg_t', sessionId: 'ses_state', t: 20, status: 'pending' });
+    db2.close();
+    emitter.tailAndPulse(dbPath, ctx); // pending → no pulse (adapter gate)
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 0);
+
+    const db3 = new DatabaseSync(dbPath);
+    // Same rowid (INSERT OR REPLACE on the same PK), later time_updated — the
+    // HWM cursor's (time, rowid) condition must still pick this up.
+    insertPart(db3, { id: 'prt_transition', messageId: 'msg_t', sessionId: 'ses_state', t: 21, status: 'completed' });
+    db3.close();
+    emitter.tailAndPulse(dbPath, ctx);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1,
+      'the completed transition must pulse exactly once');
+    emitter.closeSqliteReaders();
+  });
+});
+
+test('sqlite read_mode — message-table coverage: user text pulses human_turn, assistant tokens pulses tokens', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_msg', 'D:\\\\x', 'p', 10);");
+    db.close();
+
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: 'ses_msg', slug: 'msg',
+      project_id: null, project_label: null, read_mode: 'sqlite' };
+    emitter.tailAndPulse(dbPath, ctx); // bootstrap
+
+    const db2 = new DatabaseSync(dbPath);
+    db2.exec(`
+      INSERT INTO message (id, session_id, time_created, time_updated, data)
+      VALUES ('msg_user', 'ses_msg', 30, 30, '${JSON.stringify({ role: 'user', time: { created: 30 } })}');
+      INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+      VALUES ('prt_usertext', 'msg_user', 'ses_msg', 30, 30, '${JSON.stringify({ type: 'text', text: 'run the tests please' })}');
+      INSERT INTO message (id, session_id, time_created, time_updated, data)
+      VALUES ('msg_asst', 'ses_msg', 31, 31, '${JSON.stringify({
+        role: 'assistant', time: { created: 31, completed: 32 }, modelID: 'm', providerID: 'opencode',
+        tokens: { input: 500, output: 200, reasoning: 0, cache: { read: 8000, write: 0 } },
+      })}');
+    `);
+    db2.close();
+
+    emitter.tailAndPulse(dbPath, ctx);
+
+    const humanTurns = hub.events.filter(e => e.event === 'human_turn');
+    assert.equal(humanTurns.length, 1, 'user message must pulse human_turn');
+
+    const tokens = hub.events.filter(e => e.event === 'tokens');
+    assert.equal(tokens.length, 1, 'assistant message with tokens must pulse tokens');
+    assert.equal(tokens[0].data.input, 500);
+    assert.equal(tokens[0].data.output, 200);
+    assert.equal(tokens[0].data.cache_read, 8000);
+    emitter.closeSqliteReaders();
+  });
+});
+
 test('tailAndPulse — errors never escape (missing file is a no-op)', () => {
   const emitter = createPulseEmitter({ hub: fakeHub(), activeState: createActiveState() });
   assert.doesNotThrow(() => emitter.tailAndPulse('Z:/nope/missing.jsonl', CC_CTX));

@@ -75,18 +75,132 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     const obj = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     const sessionId = ctx.session_id || obj.sessionID || null;
     if (!sessionId) return;
+    // Fast path: the changed doc itself carries the directory (session info
+    // docs do). Otherwise fall back to the harness's resolveProjectLabel
+    // hook (message/part docs don't carry it — see registry.mjs's opencode
+    // watch config) so tool_call pulses stay attributed to their project.
     const dir = obj.directory ? obj.directory.replace(/\\/g, '/').split('/').pop() : null;
-    emitPulses([obj], {
-      ...ctx,
-      session_id: sessionId,
-      slug: ctx.slug || sessionId.replace(/^ses_/, '').slice(0, 8),
-      project_label: ctx.project_label || dir,
-    });
+    const resolvedCtx = { ...ctx, session_id: sessionId, slug: ctx.slug || sessionId.replace(/^ses_/, '').slice(0, 8) };
+    const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
+    const projectLabel = ctx.project_label || dir || (resolveLabel ? resolveLabel(resolvedCtx, filePath) : null);
+    emitPulses([obj], { ...resolvedCtx, project_label: projectLabel });
+  }
+
+  // SQLite database harnesses (opencode >= 1.18.x): a persistent reader per
+  // dbPath, cursoring the `part`/`message` tables by a High-Water Mark tuple
+  // (time_updated, rowid) — see RFC-opencode-cdc-tracking.md. This replaces
+  // an earlier `ORDER BY rowid DESC LIMIT 5` scan, which silently and
+  // permanently dropped anything beyond the 5 most recent rows under a burst
+  // (routine for parallel/rapid tool calls) and never queried `message` at
+  // all (so opencode's SQLite path emitted zero live `tokens`/`human_turn`
+  // pulses). The HWM cursor guarantees every row is delivered exactly once,
+  // in commit order, with no arbitrary window; bootstrapping it to the
+  // tables' current max on first touch means whatever was already on disk
+  // at that point (the offline scan's job) doesn't replay as a live pulse.
+  const sqliteReaders = new Map(); // dbPath → reader state
+
+  function dbPathFromWatchedFile(filePath) {
+    return filePath.endsWith('.db') ? filePath : filePath.replace(/\.db-[^/\\]+$/, '.db');
+  }
+
+  function loadSqliteReader(dbPath) {
+    const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+    if (!DatabaseSync || !fs.existsSync(dbPath)) return null;
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      db.exec('PRAGMA query_only = ON;');
+      db.exec('PRAGMA busy_timeout = 5000;'); // yield through opencode's own WAL checkpoints
+      const maxPart = db.prepare('SELECT COALESCE(MAX(time_updated),0) t, COALESCE(MAX(rowid),0) r FROM part').get();
+      const maxMsg  = db.prepare('SELECT COALESCE(MAX(time_updated),0) t, COALESCE(MAX(rowid),0) r FROM message').get();
+      return {
+        db,
+        partCursor: { time: maxPart.t, rowid: maxPart.r },
+        msgCursor:  { time: maxMsg.t,  rowid: maxMsg.r },
+        stmtParts: db.prepare(
+          `SELECT rowid, id, session_id, message_id, data, time_updated FROM part
+           WHERE time_updated > ? OR (time_updated = ? AND rowid > ?)
+           ORDER BY time_updated ASC, rowid ASC LIMIT 100`
+        ),
+        stmtMessages: db.prepare(
+          `SELECT rowid, id, session_id, data, time_updated FROM message
+           WHERE time_updated > ? OR (time_updated = ? AND rowid > ?)
+           ORDER BY time_updated ASC, rowid ASC LIMIT 100`
+        ),
+        stmtPartsByMessage: db.prepare('SELECT id, data FROM part WHERE message_id = ? ORDER BY id ASC'),
+      };
+    } catch { return null; }
+  }
+
+  // Drains a cursor's statement in LIMIT-100 pages until caught up — a burst
+  // larger than one page still delivers every row, just across more queries.
+  function drainByCursor(stmt, cursor) {
+    const out = [];
+    for (;;) {
+      const rows = stmt.all(cursor.time, cursor.time, cursor.rowid);
+      if (!rows.length) break;
+      for (const row of rows) { cursor.time = row.time_updated; cursor.rowid = row.rowid; out.push(row); }
+      if (rows.length < 100) break;
+    }
+    return out;
+  }
+
+  function sqliteAndPulse(filePath, ctx) {
+    const dbPath = dbPathFromWatchedFile(filePath);
+    let reader = sqliteReaders.get(dbPath);
+    if (!reader) {
+      reader = loadSqliteReader(dbPath);
+      if (!reader) return;
+      sqliteReaders.set(dbPath, reader);
+    }
+
+    try {
+      const partRows = drainByCursor(reader.stmtParts, reader.partCursor);
+      const msgRows  = drainByCursor(reader.stmtMessages, reader.msgCursor);
+      if (!partRows.length && !msgRows.length) return;
+
+      const dispatch = (record, sessionId) => {
+        const resolvedCtx = {
+          ...ctx,
+          session_id: sessionId,
+          slug: ctx.slug || (sessionId ? sessionId.replace(/^ses_/, '').slice(0, 8) : null),
+        };
+        const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
+        const projectLabel = ctx.project_label || (resolveLabel ? resolveLabel(resolvedCtx, dbPath) : null);
+        emitPulses([record], { ...resolvedCtx, project_label: projectLabel });
+      };
+
+      for (const row of partRows) {
+        let pData = {};
+        try { pData = JSON.parse(row.data || '{}'); } catch {}
+        dispatch({ id: row.id, sessionID: row.session_id, messageID: row.message_id, ...pData }, row.session_id);
+      }
+
+      for (const row of msgRows) {
+        let mData = {};
+        try { mData = JSON.parse(row.data || '{}'); } catch {}
+        const msgObj = { id: row.id, sessionID: row.session_id, ...mData };
+        // Message rows never carry their own text (only role/time/tokens/etc) —
+        // it lives in a separate `part` row. Join it so human_turn pulses
+        // carry real preview text, same as the JSON-tree adapter path does
+        // via `_parts`.
+        if (mData.role === 'user') {
+          msgObj._parts = reader.stmtPartsByMessage.all(row.id).map(p => {
+            let d = {};
+            try { d = JSON.parse(p.data || '{}'); } catch {}
+            return { id: p.id, ...d };
+          });
+        }
+        dispatch(msgObj, row.session_id);
+      }
+    } catch {
+      // sqlite read errors during active writes are non-fatal
+    }
   }
 
   function tailAndPulse(filePath, ctx) {
     try {
       if (ctx.read_mode === 'json') return jsonAndPulse(filePath, ctx);
+      if (ctx.read_mode === 'sqlite') return sqliteAndPulse(filePath, ctx);
       const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
       if (resolveLabel && !ctx.project_label) {
         ctx = { ...ctx, project_label: resolveLabel(ctx, filePath) };
@@ -102,5 +216,17 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     } catch { /* tail errors must not affect the main rebuild flow */ }
   }
 
-  return { tailAndPulse };
+  // Test/shutdown seam: persistent sqlite readers are never closed during
+  // normal operation (they live for the server process's lifetime), but a
+  // caller that owns a dbPath's lifecycle (tests with a temp dir; a future
+  // graceful shutdown) needs to release the handle explicitly — on Windows,
+  // an open sqlite connection blocks deleting its file.
+  function closeSqliteReaders() {
+    for (const reader of sqliteReaders.values()) {
+      try { reader.db.close(); } catch { /* already closed / never opened */ }
+    }
+    sqliteReaders.clear();
+  }
+
+  return { tailAndPulse, closeSqliteReaders };
 }
