@@ -891,6 +891,380 @@ export function contextPressure(inputTokens, cacheRead, windowTokens = 200_000) 
   return Math.max(0, Math.min(1, ctx / windowTokens));
 }
 
+/** Pressure fill tiers for Mission Control CSS (`mc-pressure__fill--*`). */
+export const MC_PRESSURE_MID = 0.55;
+export const MC_PRESSURE_HI = 0.85;
+
+/** Pulse events that earn a dedicated `mc-card--evt-*` / `mc-act--*` class. */
+export const MC_PULSE_EVENTS = new Set([
+  'tool_call', 'tool_error', 'tokens', 'words', 'chirp', 'human_turn',
+  'compact', 'thinking', 'attachment', 'scaffold', 'permission', 'mode_shift',
+  'api_error',
+]);
+
+/**
+ * Map a 0..1 context-pressure ratio to a CSS tier token.
+ * @returns {'lo'|'mid'|'hi'|null}
+ */
+export function pressureTier(ratio) {
+  if (ratio == null || typeof ratio !== 'number' || Number.isNaN(ratio)) return null;
+  if (ratio >= MC_PRESSURE_HI) return 'hi';
+  if (ratio >= MC_PRESSURE_MID) return 'mid';
+  return 'lo';
+}
+
+function mcEvtToken(raw) {
+  if (typeof raw !== 'string' || !MC_PULSE_EVENTS.has(raw)) return 'other';
+  return raw;
+}
+
+/**
+ * CSS class string for a Mission Control session card.
+ *
+ * Cognitive roles (one channel each — do not overload):
+ * - left rail (`--active/--idle` + `--evt-*`) = lifecycle + latest pulse
+ * - `--alert` = styles the error *line* only (never full-card border)
+ * - `--open` / `--thinking-live` = disclosure / live cognition flags
+ * Pressure tier lives only on `.mc-pressure__fill--*`, not on the card.
+ *
+ * @param {object} session — snapshot session from active-state
+ * @param {{ expanded?: boolean, windowTokens?: number }} [opts]
+ * @returns {string}
+ */
+export function sessionCardClasses(session, opts = {}) {
+  const s = session || {};
+  const parts = ['mc-card'];
+  parts.push(s.status === 'idle' ? 'mc-card--idle' : 'mc-card--active');
+  const evt = mcEvtToken(s.last_event);
+  parts.push('mc-card--evt-' + evt);
+  if (s.status === 'active' && s.last_event === 'thinking') parts.push('mc-card--thinking-live');
+  if (sessionAlertText(s)) parts.push('mc-card--alert');
+  if (opts.expanded) parts.push('mc-card--open');
+  return parts.join(' ');
+}
+
+/**
+ * Human triage line for session errors. Prefer last API message; else counts.
+ * @returns {string|null}
+ */
+export function sessionAlertText(session) {
+  const s = session || {};
+  const msg = s.last_api_error?.message;
+  if (msg) {
+    const code = s.last_api_error.code;
+    return '⊘ ' + msg + (code ? ' [' + code + ']' : '');
+  }
+  const bits = [];
+  if ((s.tool_errors || 0) > 0) bits.push(s.tool_errors + ' tool err');
+  if ((s.api_errors || 0) > 0) bits.push(s.api_errors + ' api err');
+  return bits.length ? '⊘ ' + bits.join(' · ') : null;
+}
+
+/**
+ * Split metrics into primary scan row vs secondary cognition counts.
+ * `ago` is a placeholder slot — caller fills the formatted age.
+ * @returns {{ primary: object[], secondary: object[] }}
+ */
+export function sessionMetricSplit(session) {
+  const s = session || {};
+  const primary = [];
+  primary.push({ key: 'tools', label: 'tools', value: s.tool_calls || 0 });
+  if ((s.tool_errors || 0) > 0) {
+    primary.push({ key: 'tool_errors', label: 'err', value: s.tool_errors, err: true });
+  }
+  if ((s.api_errors || 0) > 0) {
+    primary.push({ key: 'api_errors', label: 'api', value: s.api_errors, err: true });
+  }
+  primary.push({ key: 'tokens', label: 'tok', value: s.tokens_work || 0, fmt: 'tok' });
+  if (s.burn_rate_per_min) {
+    primary.push({ key: 'burn', label: '/min', value: s.burn_rate_per_min, fmt: 'tok', burn: true });
+  }
+  primary.push({ key: 'human', label: '⌨', value: s.human_turns || 0 });
+  primary.push({ key: 'ago', label: 'ago', value: null, ago: true });
+
+  const secondary = [];
+  if (s.compacts) secondary.push({ key: 'compacts', label: '⟲', value: s.compacts });
+  if (s.thinking_count) secondary.push({ key: 'thinking', label: '◉', value: s.thinking_count });
+  if (s.attachments) secondary.push({ key: 'attachments', label: '▣', value: s.attachments });
+  if (s.scaffolds) secondary.push({ key: 'scaffolds', label: '⬚', value: s.scaffolds });
+  return { primary, secondary };
+}
+
+/** Short labels for recency hero (mapping vernacular: cells, not prose). */
+export const MC_EVENT_LABELS = {
+  tool_call: 'tool',
+  tool_error: 'tool err',
+  tokens: 'tokens',
+  words: 'words',
+  chirp: 'chirp',
+  human_turn: 'human',
+  compact: 'compact',
+  thinking: 'thinking',
+  attachment: 'attach',
+  scaffold: 'scaffold',
+  permission: 'perm',
+  mode_shift: 'mode',
+  api_error: 'api err',
+  other: 'other',
+};
+
+/**
+ * Recency hero model — most recent pulse is the card headline.
+ * For tool_call, label is the Canonical Action Key; detail is file basename or why.
+ * @returns {{ status, mark, event, label, detail }}
+ */
+export function sessionRecencyHero(session) {
+  const s = session || {};
+  const status = s.status === 'idle' ? 'idle' : 'active';
+  const event = mcEvtToken(s.last_event);
+  let label = MC_EVENT_LABELS[event] || 'other';
+  let detail = null;
+  if (s.last_event === 'tool_call' && s.last_tool) {
+    label = s.last_tool.key || s.last_tool.tool || 'tool';
+    if (s.last_tool.where) {
+      detail = String(s.last_tool.where).replace(/\\/g, '/').split('/').pop() || null;
+    } else if (s.last_tool.why) {
+      detail = String(s.last_tool.why).trim().slice(0, 48) || null;
+    }
+  }
+  return {
+    status,
+    mark: status === 'active' ? '●' : '○',
+    event,
+    label,
+    detail,
+  };
+}
+
+/**
+ * Mapping-style tool-key chips from live `tools_by_key` histogram.
+ * Hottest keys first; capped for card density.
+ * @returns {{ key: string, count: number, cls: string }[]}
+ */
+export function sessionToolChips(session, opts = {}) {
+  const max = opts.max ?? 6;
+  const by = session?.tools_by_key || {};
+  return Object.entries(by)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, max)
+    .map(([key, count]) => ({
+      key,
+      count,
+      cls: 'mc-chip mc-chip--' + key,
+    }));
+}
+
+/** Card reorder/enter motion budget (Register A: ≤250ms). */
+export const MC_CARD_MOVE_MS = 200;
+
+/**
+ * Snapshot `.mc-card[data-sid]` geometry for FLIP.
+ * @param {ParentNode|null|undefined} root
+ * @returns {Map<string, { left: number, top: number, width: number, height: number }>}
+ */
+export function captureMcCardRects(root) {
+  const map = new Map();
+  if (!root || typeof root.querySelectorAll !== 'function') return map;
+  for (const el of root.querySelectorAll('.mc-card[data-sid]')) {
+    const sid = el.getAttribute('data-sid');
+    if (!sid) continue;
+    const r = el.getBoundingClientRect();
+    map.set(sid, { left: r.left, top: r.top, width: r.width, height: r.height });
+  }
+  return map;
+}
+
+/**
+ * FLIP plan: invert deltas for movers; `enter: true` for brand-new sids.
+ * @param {Map<string, {left:number,top:number}>} prevRects
+ * @param {Map<string, {left:number,top:number}>} nextRects
+ * @returns {{ sid: string, dx: number, dy: number, enter: boolean }[]}
+ */
+export function mcCardFlipPlan(prevRects, nextRects) {
+  const prev = prevRects instanceof Map ? prevRects : new Map();
+  const next = nextRects instanceof Map ? nextRects : new Map();
+  const plan = [];
+  for (const [sid, n] of next) {
+    const p = prev.get(sid);
+    if (!p) {
+      plan.push({ sid, dx: 0, dy: 0, enter: true });
+      continue;
+    }
+    const dx = p.left - n.left;
+    const dy = p.top - n.top;
+    if (dx !== 0 || dy !== 0) plan.push({ sid, dx, dy, enter: false });
+  }
+  return plan;
+}
+
+/** Gate motion on visual order changes (id+status); ignore ago-only ticks. */
+export function mcCardOrderKey(sessions) {
+  if (!Array.isArray(sessions) || !sessions.length) return '';
+  return sessions.map(s => `${s?.session_id || ''}:${s?.status || ''}`).join('|');
+}
+
+/**
+ * CSS class string for one recent_actions ring row.
+ * @param {{ type?: string, error?: boolean }|null} action
+ * @returns {string}
+ */
+export function actionItemClasses(action) {
+  const parts = ['mc-act'];
+  parts.push('mc-act--' + mcEvtToken(action?.type));
+  if (action?.error) parts.push('mc-act--err');
+  return parts.join(' ');
+}
+
+/** Classes for the pressure meter fill element. */
+export function pressureFillClasses(tier) {
+  const parts = ['mc-pressure__fill'];
+  if (tier === 'lo' || tier === 'mid' || tier === 'hi') parts.push('mc-pressure__fill--' + tier);
+  return parts.join(' ');
+}
+
+/** Classes for one ContextTree strip segment. */
+export function ctxSegClasses(seg) {
+  const parts = ['mc-ctxseg'];
+  if (seg?.isCurrent) parts.push('mc-ctxseg--cur');
+  return parts.join(' ');
+}
+
+/**
+ * Mission Control legend model — pulse + state grammar for the /now strip.
+ * `mod` matches `mc-card--{mod}` / pressure tier / flag suffixes; `swatch` is a
+ * Register A token key (`geo`|`dim`|`accent`|`select`|`data`|`err`|`label`).
+ * @returns {{ status: object[], events: object[], pressure: object[], flags: object[] }}
+ */
+export function missionControlLegend() {
+  return {
+    status: [
+      { mod: 'active', label: 'active', swatch: 'geo' },
+      { mod: 'idle',   label: 'idle',   swatch: 'dim' },
+    ],
+    events: [
+      { mod: 'tool_call',   label: 'tool',      swatch: 'accent' },
+      { mod: 'human_turn',  label: 'human',     swatch: 'label' },
+      { mod: 'thinking',    label: 'thinking',  swatch: 'select' },
+      { mod: 'tokens',      label: 'tokens',    swatch: 'data' },
+      { mod: 'words',       label: 'words',     swatch: 'data' },
+      { mod: 'chirp',       label: 'chirp',     swatch: 'data' },
+      { mod: 'compact',     label: 'compact',   swatch: 'data' },
+      { mod: 'permission',  label: 'perm',      swatch: 'dim' },
+      { mod: 'mode_shift',  label: 'mode',      swatch: 'dim' },
+      { mod: 'attachment',  label: 'attach',    swatch: 'dim' },
+      { mod: 'scaffold',    label: 'scaffold',  swatch: 'dim' },
+      { mod: 'tool_error',  label: 'tool err',  swatch: 'err' },
+      { mod: 'api_error',   label: 'api err',   swatch: 'err' },
+    ],
+    pressure: [
+      { mod: 'lo',  label: 'ctx lo',  swatch: 'geo' },
+      { mod: 'mid', label: 'ctx mid', swatch: 'select' },
+      { mod: 'hi',  label: 'ctx hi',  swatch: 'err' },
+    ],
+    flags: [
+      { mod: 'alert',         label: 'errors',        swatch: 'err' },
+      { mod: 'thinking-live', label: 'thinking live', swatch: 'select' },
+      { mod: 'flow',          label: 'flow=actions',  swatch: 'accent' },
+    ],
+    tools: [
+      { mod: 'read',      label: 'read',  swatch: 'select' },
+      { mod: 'write',     label: 'write', swatch: 'accent' },
+      { mod: 'edit',      label: 'edit',  swatch: 'accent' },
+      { mod: 'bash_run',  label: 'bash',  swatch: 'geo' },
+      { mod: 'grep_glob', label: 'grep',  swatch: 'label' },
+      { mod: 'agent',     label: 'agent', swatch: 'data' },
+    ],
+  };
+}
+
+/** Motion gate for FLIP/enter — honor prefers-reduced-motion. */
+export function mcMotionAllowed(media = null) {
+  if (media && typeof media.matches === 'boolean') return !media.matches;
+  return true;
+}
+
+/**
+ * Board filter: hide idles (pins survive), honor dismissed until session goes active.
+ * @param {object[]} sessions
+ * @param {{ hideIdles?: boolean, pinned?: Set<string>|string[], dismissed?: Set<string>|string[] }} [opts]
+ */
+export function filterMissionSessions(sessions, opts = {}) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const hideIdles = !!opts.hideIdles;
+  const pinned = opts.pinned instanceof Set ? opts.pinned : new Set(opts.pinned || []);
+  const dismissed = opts.dismissed instanceof Set ? opts.dismissed : new Set(opts.dismissed || []);
+  return list.filter(s => {
+    if (!s || !s.session_id) return false;
+    if (dismissed.has(s.session_id) && s.status !== 'active') return false;
+    if (hideIdles && s.status === 'idle' && !pinned.has(s.session_id)) return false;
+    return true;
+  });
+}
+
+/** Idle session ids eligible for Clear (not pinned). */
+export function idleIdsToClear(sessions, pinned = new Set()) {
+  const pin = pinned instanceof Set ? pinned : new Set(pinned || []);
+  return (sessions || [])
+    .filter(s => s && s.status === 'idle' && s.session_id && !pin.has(s.session_id))
+    .map(s => s.session_id);
+}
+
+const MC_FLOW_GLYPH = {
+  tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
+  permission: '⚙', mode_shift: '⚙', api_error: '⊘',
+  attachment: '▣', scaffold: '⬚', words: '◇', chirp: '·', tokens: '◈',
+};
+
+/**
+ * Last N recent_actions as a live work-flow strip (glyphs, not a mechanical grid).
+ * @returns {{ type: string, glyph: string, cls: string, key: string|null }[]}
+ */
+export function sessionPulseFlow(actions, max = 10) {
+  const list = Array.isArray(actions) ? actions : [];
+  const n = Math.max(0, max | 0);
+  return list.slice(-n).map(a => {
+    const type = a?.type || 'other';
+    const err = !!(a?.error || type === 'tool_error' || type === 'api_error');
+    return {
+      type,
+      glyph: MC_FLOW_GLYPH[type] || '·',
+      key: a?.key || null,
+      cls: 'mc-flow__beat mc-flow__beat--' + mcEvtToken(type) + (err ? ' mc-flow__beat--err' : ''),
+    };
+  });
+}
+
+/**
+ * Group sessions into harness lanes (breaks the flat card wall).
+ * Within each lane: active first, then last_seen desc.
+ * @param {object[]} sessions
+ * @param {string[]} [harnessOrder] — preferred lane order (unknowns append alphabetically)
+ * @returns {{ harness: string, sessions: object[] }[]}
+ */
+export function groupSessionsByHarness(sessions, harnessOrder = []) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const buckets = new Map();
+  for (const s of list) {
+    if (!s) continue;
+    const h = s.harness || 'unknown';
+    if (!buckets.has(h)) buckets.set(h, []);
+    buckets.get(h).push(s);
+  }
+  for (const arr of buckets.values()) {
+    arr.sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+      return (b.last_seen || 0) - (a.last_seen || 0);
+    });
+  }
+  const order = Array.isArray(harnessOrder) ? harnessOrder.filter(h => buckets.has(h)) : [];
+  const rest = [...buckets.keys()].filter(h => !order.includes(h)).sort();
+  return [...order, ...rest].map(harness => ({
+    harness,
+    sessions: buckets.get(harness) || [],
+  }));
+}
+
 /**
  * Distinct sessions seen in the beat ring, newest first, each with its latest
  * context pressure (null until a tokens pulse has been seen).
@@ -1176,25 +1550,39 @@ export function dominantTool(toolSummary) {
   return entries.length ? entries.sort((a, b) => b[1] - a[1])[0] : null;
 }
 
+/** Minimum strip width % — matches proportional-strip skill / graph panel (5%). */
+export const MIN_STRIP_PCT = 5;
+
 /**
  * Reduce /api/trace segments into card-ready strips: proportional width by
  * token weight, colored by each window's dominant tool (same idea as the
  * panel's context-window strips, kept independent since this feeds a fixed
  * pixel layout rather than a flex row).
+ *
+ * Extra fields (`index`, `isCurrent`, `badges`) are for Mission Control /
+ * panel consumers; share-card SVG may ignore them.
  */
 export function contextStripSegments(segments, fallbackColor) {
   const segs = segments || [];
   if (!segs.length) return [];
   const totalTok = segs.reduce((s, g) => s + (g.tokens?.output || 0) + (g.tokens?.cache_read || 0), 0) || 1;
-  return segs.map(seg => {
+  return segs.map((seg, index) => {
     const tok = (seg.tokens?.output || 0) + (seg.tokens?.cache_read || 0);
     const top = dominantTool(seg.tool_summary);
+    const branches = Array.isArray(seg.branches) ? seg.branches.length : 0;
     return {
-      pct:  Math.max(4, tok / totalTok * 100),
+      pct:  Math.max(MIN_STRIP_PCT, tok / totalTok * 100),
       tok,
       tool: top ? top[0] : null,
       color: (top && TOOL_COLORS[top[0]]) || fallbackColor || SHARE_CARD_TOKENS.dim,
       turns: (seg.user_turns || 0) + (seg.assistant_turns || 0),
+      index,
+      isCurrent: seg.compact_trigger == null,
+      badges: {
+        subagents: seg.subagent_count || 0,
+        thinking: seg.thinking_count || 0,
+        branches,
+      },
     };
   });
 }
