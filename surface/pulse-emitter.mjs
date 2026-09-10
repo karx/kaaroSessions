@@ -26,6 +26,24 @@ import { MAX_JSONL_BYTES } from '../hooks/jsonl-io.mjs';
  *   reads (default MAX_JSONL_BYTES) + test seam
  * @returns {{ tailAndPulse: (filePath: string, ctx: object) => void }}
  */
+// Tail Origin Policy (RFC-tail-origin-and-stream-honesty.md §4.2), live-
+// confirmed 2026-09-10: a single watch-bait event replayed 9 dormant
+// opencode sessions (mtimes Dec 2025 - Jul 2026) as live pulses, flooding
+// the DAW and Mission Control. Age-of-content — not "before/after server
+// start" — is the signal: a file whose last real write predates this
+// emitter's first sight of it by more than this window is backlog, not a
+// live event, regardless of exactly when the server process happened to
+// start relative to the write (that race is what a serveStartedAt-style
+// check would inherit).
+const STALE_BACKLOG_AGE_MS = 5 * 60 * 1000; // 5 minutes
+// Below this size, a jsonl transcript is cheap to replay in full even if
+// old — only large dormant backlogs are worth seeding at EOF instead of
+// streaming. opencode's per-message/part JSON-tree files have no size
+// floor (see jsonAndPulse) because they're written once and never grow —
+// unlike a jsonl transcript, "small but old" isn't a proxy for "harmless";
+// it's the exact shape the live flood was made of.
+const STALE_BACKLOG_SIZE_THRESHOLD = 64 * 1024;
+
 export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrottleMs = 1000, maxBytes = MAX_JSONL_BYTES }) {
   const offsetMap = new Map(); // filePath → byte offset (jsonl) or size:mtime sig (json)
   let nowTimer = null;
@@ -67,8 +85,13 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
   function jsonAndPulse(filePath, ctx) {
     const stat = fs.statSync(filePath);
     const sig = `${stat.size}:${stat.mtimeMs}`;
+    const firstSight = !offsetMap.has(filePath);
     if (offsetMap.get(filePath) === sig) return;
-    offsetMap.set(filePath, sig);
+    offsetMap.set(filePath, sig); // record the signature even when suppressed below — a real future edit still needs to diff against something
+
+    if (firstSight && (Date.now() - stat.mtimeMs) > STALE_BACKLOG_AGE_MS) {
+      return; // dormant file, first sight — Tail Origin Policy, see the module header comment
+    }
 
     // Same OOM guard as the jsonl tail path — a whole-file JSON harness
     // (opencode) rewrites its file on every change, so this read is
@@ -269,7 +292,14 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
       if (resolveLabel && !ctx.project_label) {
         ctx = { ...ctx, project_label: resolveLabel(ctx, filePath) };
       }
-      const offset = offsetMap.get(filePath) ?? 0;
+      let offset = offsetMap.get(filePath);
+      if (offset === undefined) {
+        offset = 0;
+        const stat = fs.statSync(filePath);
+        if (stat.size > STALE_BACKLOG_SIZE_THRESHOLD && (Date.now() - stat.mtimeMs) > STALE_BACKLOG_AGE_MS) {
+          offset = stat.size; // Tail Origin Policy — seed at EOF, don't replay a large dormant backlog
+        }
+      }
       const { records, newOffset, skippedBytes } = tailRead(filePath, offset, { maxBytes });
       offsetMap.set(filePath, newOffset);
       if (skippedBytes) {

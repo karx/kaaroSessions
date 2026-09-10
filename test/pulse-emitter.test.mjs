@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, appendFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, appendFileSync, rmSync, utimesSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createPulseEmitter } from '../surface/pulse-emitter.mjs';
@@ -532,6 +532,130 @@ test('tailAndPulse — over-cap delta is skipped, not crashed, and offset jumps 
     appendFileSync(fp, oneLine, 'utf8');
     emitter.tailAndPulse(fp, CC_CTX);
     assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1, 'offset had advanced past the skipped bytes');
+  });
+});
+
+// ── Tail Origin Policy (RFC-tail-origin-and-stream-honesty.md §4.2) ────────
+// Live-confirmed 2026-09-10: a single watch-bait event on ~/.local/share/
+// opencode's recursive watch caused first-sight reads of 9 long-dormant
+// opencode session files (mtimes spanning Dec 2025 - Jul 2026, days to
+// months old) to replay their entire historical content as live pulses,
+// flooding the DAW and Mission Control ("now" page) with sessions the user
+// wasn't running. Age-of-content (not "before/after server start", which
+// races against exactly when the pulse emitter happens to be constructed
+// relative to file writes — see the JSONL-path tests above that
+// deliberately write the file before the emitter exists) is what actually
+// distinguishes "this just happened" from "this is backlog": a file whose
+// last real write is more than STALE_BACKLOG_AGE_MS old, first seen by this
+// emitter, is backlog and must not replay — but its signature/offset must
+// still be recorded so a genuine subsequent edit (which bumps mtime/size)
+// is detected normally.
+
+function setOldMtime(fp, ageMs) {
+  const old = new Date(Date.now() - ageMs);
+  utimesSync(fp, old, old);
+}
+
+test('json read_mode — first sight of a long-dormant file (old mtime) does not replay as a live pulse', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 'msg_dormant.json');
+    writeFileSync(fp, JSON.stringify({
+      id: 'msg_dormant', sessionID: 'ses_dormant1234', role: 'assistant',
+      time: { created: 1735142400000 }, modelID: 'm', providerID: 'opencode',
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      finish: 'stop', _parts: [],
+    }), 'utf8');
+    setOldMtime(fp, 9 * 30 * 24 * 60 * 60 * 1000); // ~9 months old, like the live incident
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: null, slug: null,
+      project_id: null, project_label: null, read_mode: 'json' };
+
+    emitter.tailAndPulse(fp, ctx);
+    assert.equal(hub.events.filter(e => e.event !== 'now').length, 0,
+      'a 9-month-old dormant file must not replay as a live pulse on first sight');
+  });
+});
+
+test('json read_mode — a dormant file that is genuinely re-written afterward still pulses normally', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 'msg_dormant2.json');
+    const oldDoc = { id: 'msg_dormant2', sessionID: 'ses_dormant2', role: 'assistant',
+      time: { created: 1 }, modelID: 'm', providerID: 'opencode',
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }, finish: 'stop', _parts: [] };
+    writeFileSync(fp, JSON.stringify(oldDoc), 'utf8');
+    setOldMtime(fp, 24 * 60 * 60 * 1000); // 1 day old
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: null, slug: null,
+      project_id: null, project_label: null, read_mode: 'json' };
+
+    emitter.tailAndPulse(fp, ctx); // dormant — suppressed
+    assert.equal(hub.events.filter(e => e.event !== 'now').length, 0);
+
+    // A real edit lands (fresh mtime, changed content) — must NOT be treated
+    // as more backlog just because this emitter's first sight of the path
+    // was suppressed.
+    writeFileSync(fp, JSON.stringify({ ...oldDoc, tokens: { ...oldDoc.tokens, output: 99 } }), 'utf8');
+    emitter.tailAndPulse(fp, ctx);
+    assert.ok(hub.events.filter(e => e.event !== 'now').length > 0,
+      'a genuine edit after the suppressed first sight must still pulse');
+  });
+});
+
+test('json read_mode — a freshly-written file (mtime just now) still pulses normally on first sight (no regression)', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 'msg_fresh.json');
+    writeFileSync(fp, JSON.stringify({
+      id: 'msg_fresh', sessionID: 'ses_fresh1234', role: 'assistant',
+      time: { created: Date.now() }, modelID: 'm', providerID: 'opencode',
+      tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      finish: 'stop', _parts: [],
+    }), 'utf8');
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+    const ctx = { harness: 'opencode', session_id: null, slug: null,
+      project_id: null, project_label: null, read_mode: 'json' };
+
+    emitter.tailAndPulse(fp, ctx);
+    assert.ok(hub.events.filter(e => e.event !== 'now').length > 0,
+      'a file written moments ago must still stream live, even right after server start');
+  });
+});
+
+test('tailAndPulse (jsonl) — first sight of a large pre-existing file seeds at EOF, no historical replay', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 's.jsonl');
+    // Over the 64KB stale-backlog size floor.
+    const bigLine = CC_LINE + ' '.repeat(70 * 1024) + '\n';
+    writeFileSync(fp, bigLine, 'utf8');
+    setOldMtime(fp, 24 * 60 * 60 * 1000); // 1 day old
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+
+    emitter.tailAndPulse(fp, CC_CTX);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 0,
+      'a large day-old backlog file must not replay in full on first sight');
+
+    // A real live append afterward must stream normally.
+    appendFileSync(fp, CC_LINE + '\n', 'utf8');
+    emitter.tailAndPulse(fp, CC_CTX);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1,
+      'appends after the seeded-at-EOF first sight must still pulse');
+  });
+});
+
+test('tailAndPulse (jsonl) — a small pre-existing file still replays fully on first sight (cheap either way)', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 's.jsonl');
+    writeFileSync(fp, CC_LINE + '\n', 'utf8'); // well under the 64KB floor
+    setOldMtime(fp, 24 * 60 * 60 * 1000); // 1 day old
+    const hub = fakeHub();
+    const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+
+    emitter.tailAndPulse(fp, CC_CTX);
+    assert.equal(hub.events.filter(e => e.event === 'tool_call').length, 1,
+      'a small day-old file is cheap to replay in full and is not treated as flood-risk backlog');
   });
 });
 
