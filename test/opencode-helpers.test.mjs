@@ -17,6 +17,8 @@ import {
   OPENCODE_VERSION_MARKERS,
   OPENCODE_SUPPORTED_VERSIONS,
   detectOpencodeVersionMarker,
+  warnOnOpencodeVersionMismatch,
+  clearOpencodeVersionWarnings,
 } from '../hooks/helpers/opencode-helpers.mjs';
 
 function withTempStorage(fn) {
@@ -37,6 +39,50 @@ test('opencode version markers and supported versions contracts', () => {
   assert.equal(detectOpencodeVersionMarker('2.0.0'), null);
   assert.equal(detectOpencodeVersionMarker(null), null);
   assert.equal(detectOpencodeVersionMarker(''), null);
+});
+
+// detectOpencodeVersionMarker was previously plumbed through (exported,
+// re-exported, unit-tested) but never actually called from production code —
+// ctx.version_marker was set directly from hardcoded constants based on
+// which watch path fired, not by inspecting a real version string. This
+// wires it into an actual check: readOpencodeSession/readOpencodeDbSession
+// call warnOnOpencodeVersionMismatch so a future opencode release that
+// changes format again (like 1.0.x → 1.18.x already did) surfaces a warning
+// instead of silently mis-parsing.
+test('warnOnOpencodeVersionMismatch — warns once when version does not match the reader that read it', () => {
+  clearOpencodeVersionWarnings();
+  const warned = [];
+  const orig = console.warn;
+  console.warn = (msg) => warned.push(msg);
+  try {
+    // A V1 (1.0.x) session read via the V2 (SQLite) reader — format drifted.
+    const msg1 = warnOnOpencodeVersionMismatch('1.0.201', OPENCODE_VERSION_MARKERS.V2_SQLITE_DB);
+    assert.ok(msg1 && msg1.includes('1.0.201'));
+    assert.equal(warned.length, 1);
+
+    // Same (version, expectedMarker) pair again — deduped, no second warning.
+    const msg2 = warnOnOpencodeVersionMismatch('1.0.201', OPENCODE_VERSION_MARKERS.V2_SQLITE_DB);
+    assert.equal(msg2, null);
+    assert.equal(warned.length, 1);
+  } finally {
+    console.warn = orig;
+  }
+});
+
+test('warnOnOpencodeVersionMismatch — no-op when version matches the reader, or is missing/unrecognized', () => {
+  clearOpencodeVersionWarnings();
+  const warned = [];
+  const orig = console.warn;
+  console.warn = (msg) => warned.push(msg);
+  try {
+    assert.equal(warnOnOpencodeVersionMismatch('1.18.30', OPENCODE_VERSION_MARKERS.V2_SQLITE_DB), null);
+    assert.equal(warnOnOpencodeVersionMismatch('1.0.201', OPENCODE_VERSION_MARKERS.V1_STORAGE_JSON), null);
+    assert.equal(warnOnOpencodeVersionMismatch(null, OPENCODE_VERSION_MARKERS.V1_STORAGE_JSON), null);
+    assert.equal(warnOnOpencodeVersionMismatch('not-a-version', OPENCODE_VERSION_MARKERS.V1_STORAGE_JSON), null);
+    assert.equal(warned.length, 0);
+  } finally {
+    console.warn = orig;
+  }
 });
 
 test('opencodeSessionLabel — derives the label from SQLite session row if present', () => {

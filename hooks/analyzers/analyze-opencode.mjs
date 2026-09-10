@@ -33,6 +33,7 @@ import {
   OPENCODE_VERSION_MARKERS,
   OPENCODE_SUPPORTED_VERSIONS,
   detectOpencodeVersionMarker,
+  warnOnOpencodeVersionMismatch,
 } from '../helpers/opencode-helpers.mjs';
 
 export {
@@ -93,6 +94,7 @@ export function readOpencodeSession(storageRoot, infoPath) {
   }
   messages.sort((a, b) => (a.time?.created || 0) - (b.time?.created || 0));
 
+  warnOnOpencodeVersionMismatch(info.version, OPENCODE_VERSION_MARKERS.V1_STORAGE_JSON);
   return { info, records: [info, ...messages], sizeBytes };
 }
 
@@ -169,6 +171,7 @@ export function readOpencodeDbSession(dbPath, sessionId) {
     }
 
     const sizeBytes = fs.statSync(dbPath).size;
+    warnOnOpencodeVersionMismatch(info.version, OPENCODE_VERSION_MARKERS.V2_SQLITE_DB);
     return { info, records: [info, ...msgRecords], sizeBytes };
   } catch {
     return null;

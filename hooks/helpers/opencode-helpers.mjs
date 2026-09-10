@@ -32,6 +32,32 @@ export function detectOpencodeVersionMarker(versionStr) {
   return null;
 }
 
+const warnedVersionKeys = new Set();
+
+/**
+ * Warn once per distinct (version, expectedMarker) pair when a session's own
+ * declared version doesn't match the storage-layout reader that read it —
+ * an early-warning canary for the next time opencode changes its on-disk
+ * format (it already has, once: 1.0.x JSON tree → 1.18.x SQLite). No-op for
+ * a missing/unrecognized version string, or when it matches as expected.
+ * @returns {string|null} the warning message if one was logged, else null
+ */
+export function warnOnOpencodeVersionMismatch(versionStr, expectedMarker) {
+  const marker = detectOpencodeVersionMarker(versionStr);
+  if (!marker || marker === expectedMarker) return null;
+  const key = `${versionStr}::${expectedMarker}`;
+  if (warnedVersionKeys.has(key)) return null;
+  warnedVersionKeys.add(key);
+  const message = `[opencode] session declares version ${versionStr} (marker ${marker}) but was read via the ${expectedMarker} storage-layout reader — opencode's on-disk format may have changed again; check hooks/TRACE-opencode-sessions.md and docs/OPENCODE.md.`;
+  console.warn(message);
+  return message;
+}
+
+/** Test seam: reset the per-process version-mismatch warning dedupe set. */
+export function clearOpencodeVersionWarnings() {
+  warnedVersionKeys.clear();
+}
+
 const sessionLabelCache = new Map(); // `${storageRoot}::${sessionId}` → label|null
 
 export function opencodeSessionLabel(sessionId, storageRoot) {
