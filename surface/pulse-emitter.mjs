@@ -131,17 +131,30 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     } catch { return null; }
   }
 
-  // Drains a cursor's statement in LIMIT-100 pages until caught up — a burst
-  // larger than one page still delivers every row, just across more queries.
-  function drainByCursor(stmt, cursor) {
-    const out = [];
+  // Drains a cursor's statement in LIMIT-100 pages until caught up, dispatching
+  // each row as it's fetched — a burst larger than one page still delivers
+  // every row, just across more queries. The cursor advances per row, AFTER
+  // that row's dispatch (success or logged failure), never before: advancing
+  // eagerly during the SELECT phase (an earlier design) let a dispatch-time
+  // exception on row N silently and permanently skip every row after it in
+  // the batch, since the cursor had already passed them before dispatch ever
+  // ran. One bad row is now logged and skipped — not a black hole for
+  // everything downstream of it.
+  function drainAndDispatch(stmt, cursor, buildRecord, dispatch) {
     for (;;) {
       const rows = stmt.all(cursor.time, cursor.time, cursor.rowid);
       if (!rows.length) break;
-      for (const row of rows) { cursor.time = row.time_updated; cursor.rowid = row.rowid; out.push(row); }
+      for (const row of rows) {
+        try {
+          dispatch(buildRecord(row), row.session_id);
+        } catch (err) {
+          console.error(`[opencode] sqlite live-pulse dispatch failed for row ${row.id} (session ${row.session_id}) — skipping just this row:`, err);
+        }
+        cursor.time = row.time_updated;
+        cursor.rowid = row.rowid;
+      }
       if (rows.length < 100) break;
     }
-    return out;
   }
 
   function sqliteAndPulse(filePath, ctx) {
@@ -153,29 +166,25 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
       sqliteReaders.set(dbPath, reader);
     }
 
-    try {
-      const partRows = drainByCursor(reader.stmtParts, reader.partCursor);
-      const msgRows  = drainByCursor(reader.stmtMessages, reader.msgCursor);
-      if (!partRows.length && !msgRows.length) return;
-
-      const dispatch = (record, sessionId) => {
-        const resolvedCtx = {
-          ...ctx,
-          session_id: sessionId,
-          slug: ctx.slug || (sessionId ? sessionId.replace(/^ses_/, '').slice(0, 8) : null),
-        };
-        const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
-        const projectLabel = ctx.project_label || (resolveLabel ? resolveLabel(resolvedCtx, dbPath) : null);
-        emitPulses([record], { ...resolvedCtx, project_label: projectLabel });
+    const dispatch = (record, sessionId) => {
+      const resolvedCtx = {
+        ...ctx,
+        session_id: sessionId,
+        slug: ctx.slug || (sessionId ? sessionId.replace(/^ses_/, '').slice(0, 8) : null),
       };
+      const resolveLabel = getHarness(ctx.harness)?.watch?.resolveProjectLabel;
+      const projectLabel = ctx.project_label || (resolveLabel ? resolveLabel(resolvedCtx, dbPath) : null);
+      emitPulses([record], { ...resolvedCtx, project_label: projectLabel });
+    };
 
-      for (const row of partRows) {
+    try {
+      drainAndDispatch(reader.stmtParts, reader.partCursor, (row) => {
         let pData = {};
         try { pData = JSON.parse(row.data || '{}'); } catch {}
-        dispatch({ id: row.id, sessionID: row.session_id, messageID: row.message_id, ...pData }, row.session_id);
-      }
+        return { id: row.id, sessionID: row.session_id, messageID: row.message_id, ...pData };
+      }, dispatch);
 
-      for (const row of msgRows) {
+      drainAndDispatch(reader.stmtMessages, reader.msgCursor, (row) => {
         let mData = {};
         try { mData = JSON.parse(row.data || '{}'); } catch {}
         const msgObj = { id: row.id, sessionID: row.session_id, ...mData };
@@ -190,10 +199,12 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
             return { id: p.id, ...d };
           });
         }
-        dispatch(msgObj, row.session_id);
-      }
-    } catch {
-      // sqlite read errors during active writes are non-fatal
+        return msgObj;
+      }, dispatch);
+    } catch (err) {
+      // The SELECT itself failing (locked db, corrupted file, etc) — the
+      // cursor hasn't moved, so the next tick retries from the same point.
+      console.error('[opencode] sqlite live-pulse read failed (will retry next tick):', err);
     }
   }
 

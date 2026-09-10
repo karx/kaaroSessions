@@ -308,6 +308,68 @@ test('sqlite read_mode — a burst of >5 tool parts all pulse, in order, with no
   });
 });
 
+// Regression test for a second bug found while investigating a live report
+// of missing opencode pulses: the cursor previously advanced as rows were
+// SELECTed, before dispatch ran — so a dispatch-time exception on row N
+// silently and permanently lost every row after it in that batch (the
+// cursor had already passed them). Reproduced live: 31 DB rows since server
+// start vs 22 active-state pulses, measured simultaneously. Fixed by
+// advancing the cursor per-row, after that row's dispatch (success or
+// logged failure) — never before.
+test('sqlite read_mode — a dispatch failure on one row does not poison rows after it in the same batch', () => {
+  const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
+  if (!DatabaseSync) return;
+
+  withTempDir((root) => {
+    const dbPath = join(root, 'opencode.db');
+    const db = new DatabaseSync(dbPath);
+    opencodeDbSchema(db);
+    db.exec("INSERT INTO session (id, directory, project_id, time_updated) VALUES ('ses_poison', 'D:\\\\src\\\\poisonproj', 'p', 100);");
+    db.close();
+
+    const events = [];
+    const hub = {
+      notify: (event, data) => {
+        const parsed = data ? JSON.parse(data) : null;
+        if (event === 'tool_call' && parsed?.where && parsed.where.includes('file2.js')) {
+          throw new Error('simulated downstream failure');
+        }
+        events.push({ event, data: parsed });
+      },
+    };
+    const origErr = console.error;
+    const errors = [];
+    console.error = (...args) => errors.push(args);
+
+    try {
+      const emitter = createPulseEmitter({ hub, activeState: createActiveState() });
+      try {
+        const ctx = { harness: 'opencode', session_id: 'ses_poison', slug: 'poison',
+          project_id: null, project_label: null, read_mode: 'sqlite' };
+        emitter.tailAndPulse(dbPath, ctx); // bootstrap
+
+        const db2 = new DatabaseSync(dbPath);
+        insertPart(db2, { id: 'prt_p1', messageId: 'm', sessionId: 'ses_poison', t: 200, input: { filePath: 'file1.js' } });
+        insertPart(db2, { id: 'prt_p2', messageId: 'm', sessionId: 'ses_poison', t: 201, input: { filePath: 'file2.js' } }); // throws downstream
+        insertPart(db2, { id: 'prt_p3', messageId: 'm', sessionId: 'ses_poison', t: 202, input: { filePath: 'file3.js' } });
+        db2.close();
+
+        emitter.tailAndPulse(dbPath, ctx);
+        const toolCalls = events.filter(e => e.event === 'tool_call');
+        assert.ok(toolCalls.some(e => e.data.where.includes('file1.js')), 'row before the failure must pulse');
+        assert.ok(toolCalls.some(e => e.data.where.includes('file3.js')),
+          'row AFTER the failing one must not be silently lost — this is the regression');
+        const dispatchErrors = errors.filter(args => args.some(a => String(a).includes('[opencode] sqlite live-pulse dispatch failed')));
+        assert.equal(dispatchErrors.length, 1, 'the failure must be logged, not swallowed');
+      } finally {
+        emitter.closeSqliteReaders();
+      }
+    } finally {
+      console.error = origErr;
+    }
+  });
+});
+
 test('sqlite read_mode — a part updated pending → completed pulses exactly once (terminal-gate + cursor agree)', () => {
   const DatabaseSync = process.getBuiltinModule?.('node:sqlite')?.DatabaseSync;
   if (!DatabaseSync) return;
