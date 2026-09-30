@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"019dca2b-f4f5-7609-96ae-fe883f7a03db","timestamp":"2026-04-26T14:22:51.638Z","cwd":"D:\\src\\ebrain"}
+{"type":"model_change","id":"mc01","timestamp":"2026-04-26T14:22:52.000Z","provider":"openai","modelId":"gpt-5.4"}
+{"type":"message","id":"u01","timestamp":"2026-04-26T14:23:00.000Z","message":{"role":"user","content":[{"type":"text","text":"setup pi to leverage a new LLM provider"}]}}
+{"type":"message","id":"a01","timestamp":"2026-04-26T14:23:05.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tc01","name":"read","arguments":{"path":"D:/src/ebrain/foo.js"}},{"type":"toolCall","id":"tc02","name":"bash","arguments":{"command":"git status"}}],"provider":"google-antigravity","model":"gemini-3.1-pro-low","usage":{"input":100,"output":40,"cacheRead":10,"cacheWrite":5},"stopReason":"toolUse"}}

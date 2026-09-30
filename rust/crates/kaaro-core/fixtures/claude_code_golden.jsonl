@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-05-01T10:00:00.000Z","gitBranch":"main","message":{"content":"<command-name>review</command-name> fix the auth module please"}}
+{"type":"system","subtype":"compact_boundary","timestamp":"2026-05-01T10:01:00.000Z"}
+{"type":"ai-title","timestamp":"2026-05-01T10:01:01.000Z","aiTitle":"Auth fix session"}
+{"type":"assistant","timestamp":"2026-05-01T10:02:00.000Z","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":20},"content":[{"type":"tool_use","name":"Read","input":{"file_path":"D:/src/app/auth.js"}},{"type":"tool_use","name":"Agent","input":{"description":"review sub"}},{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-05-01T10:03:00.000Z","slug":"auth-fix-slug","durationMs":180000,"messageCount":2,"gitBranch":"main"}
