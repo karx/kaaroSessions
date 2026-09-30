@@ -1,0 +1,19 @@
+[package]
+name = "kaaro-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "kaaroSessions CLI — analyze + serve"
+default-run = "kaaro-sessions"
+
+[[bin]]
+name = "kaaro-sessions"
+path = "src/main.rs"
+
+[dependencies]
+kaaro-core = { workspace = true }
+kaaro-surface = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }

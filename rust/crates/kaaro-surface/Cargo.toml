@@ -1,0 +1,21 @@
+[package]
+name = "kaaro-surface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP snapshot surface for kaaroSessions (axum)"
+
+[dependencies]
+kaaro-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tokio-stream = { workspace = true }
+futures-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net"] }
+tower = { workspace = true }
+http-body-util = "0.1"

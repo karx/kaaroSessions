@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/kaaro-core", "crates/kaaro-cli", "crates/kaaro-surface"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+kaaro-core = { path = "crates/kaaro-core" }
+kaaro-surface = { path = "crates/kaaro-surface" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "time", "sync"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tokio-stream = "0.1"
+futures-util = "0.3"

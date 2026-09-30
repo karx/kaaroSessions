@@ -14,3 +14,6 @@ node_modules/
 /agent-tools/
 /.claude/settings.local.json
 /.commandcode/
+
+# Rust port (workspace target dir)
+/rust/target/
