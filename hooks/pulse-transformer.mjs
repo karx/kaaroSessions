@@ -1,4 +1,4 @@
-import { toolNameToKey } from './action-keys.mjs';
+import { toolNameToKey, toolIntent } from './action-keys.mjs';
 import { pulseDisposition } from './pulse-map.mjs';
 
 /**
@@ -64,7 +64,7 @@ function transformRecord(nr, ctx, capabilities) {
       const why   = nr.input?.command || nr.input?.description || null;
       return {
         event: 'tool_call',
-        data: { ...env, tool: nr.tool, key, where, why, category: key },
+        data: { ...env, tool: nr.tool, key, intent: toolIntent(nr.tool, nr.input), where, why, category: key },
       };
     }
 
@@ -121,7 +121,9 @@ function transformRecord(nr, ctx, capabilities) {
     case 'human_turn': {
       return {
         event: 'human_turn',
-        data: { ...env, text: nr.text || null },
+        // prompt: false only when the adapter says display_text is explicitly
+        // null (CC tool_result-only user rows). Absent field → a real prompt.
+        data: { ...env, text: nr.text || null, prompt: nr.display_text !== null },
       };
     }
 
