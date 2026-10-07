@@ -29,7 +29,7 @@ No `npm install` needed — zero external dependencies. D3 v7 and 3d-force-graph
 - `GET /now` (or `/mission`, `/active`) — **Mission Control** (`now.html` built artifact, Register A): per-harness rollup with capability badges, expandable session cards (recent-actions feed, on-demand context-window strip, mode/permission chips, api-error line).
 - `GET /mapping` (or `/kind-map`) — **Kind Map** (generated HTML): harness × RECORD_KIND coverage grid (disposition on the kind stub; `content_block` / `tool_result` expand to pulseDisposition routes) + tool-key × raw names + **unknown bucket** (distinct `unknown` holes with counts; copy JSON for a maintainer). Harnesses whose root exists on this machine **and** have local sessions (or a live pulse) get a `LOCAL` tag. Cells: proved / live / n/a (capability off) / hole. Baseline = goldens + samples; overlay = live `/events` pulses with `nr_kind`. `GET /api/kind-map` JSON includes `unknowns[]`; `GET /mapping?partial=1` snippet. See `RFC-kind-map.md`.
 - `GET /events` — SSE stream; lifecycle events (`status`, `updated`, `error`), live pulse events (`tool_call`, `tokens`, `words`, `human_turn`, `compact`, `permission`, `mode_shift`, `tool_error`, `api_error`, `chirp`, `thinking`, …), plus throttled `now` snapshots (≤1/s)
-- `GET /api/active` — Mission Control snapshot from `surface/active-state.mjs` (`{ generated_at, sessions[] (incl. recent_actions ring), by_harness, totals }`)
+- `GET /api/active` — Mission Control snapshot from `surface/active-state.mjs` (`{ generated_at, sessions[] (incl. recent_actions ring), by_harness, totals }`). Each session also carries `phase` (`think|do|verify|null`, from `tool_call.data.intent`), `time_in_phase_s`, `lead_in { turns, tool_calls }`, `ripeness { state, inputs[] }` and `health { state, inputs[] }` — explainable states from `surface/session-vitals.mjs` (every input row has `id, value, verdict, note`; thresholds exported + tunable). A *round* = one human prompt (`human_turn.data.prompt !== false`) + the agent work after it. See `RFC-session-triggers.md`.
 - `GET /api/harnesses` — registry descriptors `{ id, label, capabilities }` — the experience layer's capability source
 - `GET /api/signals` — policy signals payload from `signals-data.json` (`{ generated_at, total_signals, by_level, by_rule, signals[] }`); empty payload when no policy configured. Policy: `hooks/policy.mjs` loads/merges `.agents/policy.json` (project, prepends) + `~/.agents/policy.json` (global); `hooks/signal-evaluator.mjs` evaluates session-scoped predicates (`skill`, `tool`, `tools.contains` [needs companion `skill` + `skill_attribution`], `tool_errors.gt`, `cache_hit_rate.lt`, `duration_min.gt`, `project`, `compact_count.gt`), first match wins, unsupported predicates → visible INFO diagnostic (deduped per rule in `buildSignalsData`). Signals only — auditor, never gatekeeper. `analyze.mjs` writes `signals-data.json` (gitignored) on every run.
 - `GET /graph-data.json` — current graph payload for incremental updates
@@ -207,7 +207,9 @@ Test files map to modules:
 - `test/ticker-store.test.mjs` → `experience/audio/ticker-store.mjs`
 - `test/audio-sim.test.mjs` → `experience/audio/audio-sim.mjs` + `experience/audio/audio-presets.mjs` (resolveSonic, resolveHz, simulateSession, all 3 presets; Grok tool aliases; web key)
 - `test/grok-helpers.test.mjs` → `hooks/helpers/grok-helpers.mjs` (grokToolWhere path extraction, grokRecordTs, grokSessionUpdate)
-- `test/active-state.test.mjs` → `surface/active-state.mjs` (Mission Control store: pulses, burn rate, status, rollups)
+- `test/active-state.test.mjs` → `surface/active-state.mjs` (Mission Control store: pulses, burn rate, status, rollups, phase rounds, lead-in)
+- `test/session-vitals.test.mjs` → `surface/session-vitals.mjs` (Session Ripeness + Session Health rule tables)
+- `test/action-keys.test.mjs` → `hooks/action-keys.mjs` (`shellIntent` / `toolIntent`: mutate / verify / read beside the canonical keys)
 - `test/opencode-adapter.test.mjs` → `hooks/adapters/opencode.mjs` (+ toolNameToKey opencode/task aliases)
 - `test/analyze-opencode.test.mjs` → `hooks/analyzers/analyze-opencode.mjs` (read/analyze/scan over temp storage tree)
 - `test/copilot-adapter.test.mjs` → `hooks/adapters/copilot.mjs` + `hooks/helpers/copilot-helpers.mjs` (op-log mapping, URI decode, aliases)
@@ -218,7 +220,7 @@ Test files map to modules:
 - `test/harness-parity.test.mjs` → sample traces + capability-enforced field parity (registry flags ARE the matrix)
 - `test/scan-walk.test.mjs` / `test/jsonl-io.test.mjs` → the shared scanner skeleton + JSONL reader
 - `test/sse-hub.test.mjs` / `test/pulse-emitter.test.mjs` / `test/rebuild-orchestrator.test.mjs` / `test/http-routes.test.mjs` → the decomposed serve runtime (ephemeral ports, no child processes)
-- `test/client-core.test.mjs` → `experience/client-core.mjs` (formatters, colors, geometry, SSE wiring, filters, force profiles, DAW legend)
+- `test/client-core.test.mjs` → `experience/client-core.mjs` (formatters, colors, geometry, SSE wiring, filters, force profiles, DAW legend, /now vitals rendering)
 - `test/design-tokens.test.mjs` / `test/design-lint.test.mjs` → Register A tokens + the grammar guard (no blue chrome, no shadows/gradients/large radii)
 
 ## Known coverage gaps
