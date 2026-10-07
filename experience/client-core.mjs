@@ -1629,3 +1629,72 @@ export async function shareCard(svgString, title = 'kaaroSessions', text = '', f
   await downloadCard(svgString, filename);
   return 'downloaded';
 }
+
+// ── Session vitals (/now: phase · ripeness · health) ─────────────────────────
+// Renders the surface's explainable states (surface/session-vitals.mjs via
+// /api/active). Classes only — page CSS maps them to --k-* tokens.
+
+export const VITAL_CLASS = {
+  phase:    { think: 'v-think', do: 'v-do', verify: 'v-verify' },
+  ripeness: { fresh: 'v-dim', ripening: 'v-body', ripe: 'v-ok', overripe: 'v-warn', stalled: 'v-bad' },
+  health:   { ok: 'v-ok', strained: 'v-warn', degraded: 'v-bad', unknown: 'v-dim' },
+  verdict:  { ok: 'v-ok', info: 'v-dim', warn: 'v-warn', bad: 'v-bad', na: 'v-na' },
+};
+
+export const VERDICT_GLYPH = { ok: '✓', info: '·', warn: '!', bad: '✖', na: '–' };
+
+export function vitalsLineHtml(s, caps = {}) {
+  if (!s || (!s.health && s.phase === undefined)) return '';
+  const bits = [];
+  if (caps.phase === false) {
+    bits.push('PHASE <span class="v-dim">—</span>');
+  } else {
+    const ph = s.phase;
+    bits.push('PHASE ' + (ph
+      ? '<span class="' + VITAL_CLASS.phase[ph] + '">' + ph.toUpperCase() + '</span>' +
+        (s.time_in_phase_s != null ? ' <b>' + fmtAgo(s.time_in_phase_s) + '</b>' : '')
+      : '<span class="v-dim">—</span>'));
+    const r = s.ripeness && s.ripeness.state;
+    if (r) bits.push('<span class="' + VITAL_CLASS.ripeness[r] + '">' + r.toUpperCase() + '</span>');
+    if (s.lead_in && s.lead_in.turns) {
+      bits.push('lead-in <b>' + s.lead_in.turns + 't · ' + s.lead_in.tool_calls + ' tools</b>');
+    }
+  }
+  if (s.health && s.health.state) {
+    bits.push('HEALTH <span class="' + VITAL_CLASS.health[s.health.state] + '">' +
+      s.health.state.toUpperCase() + '</span>');
+  }
+  return '<div class="vitals">' + bits.join(' · ') + '</div>';
+}
+
+function vitalValue(row) {
+  if (row.value == null) return '—';
+  let v = typeof row.value === 'boolean' ? (row.value ? 'yes' : 'no') : String(row.value);
+  if (row.id === 'pause_s' || row.id === 'idle_s') v = fmtAgo(row.value);
+  if (row.est_rewrite_tokens) v += ' · ≈' + fmtTok(row.est_rewrite_tokens) + ' rewrite';
+  return v;
+}
+
+function vitalRows(inputs) {
+  return (inputs || []).map(i =>
+    '<div class="vrow"><span class="' + VITAL_CLASS.verdict[i.verdict] + '">' +
+      (VERDICT_GLYPH[i.verdict] || '·') + '</span> ' +
+      '<span class="vk">' + esc(String(i.id).replace(/_/g, ' ')) + '</span>' +
+      '<span class="vv">' + esc(vitalValue(i)) + '</span>' +
+      '<span class="vn">' + esc(i.note || '') + '</span></div>').join('');
+}
+
+export function vitalsDetailHtml(s, caps = {}) {
+  let html = '';
+  const r = s && s.ripeness;
+  if (caps.phase !== false && r && r.state) {
+    html += '<div class="d-hd">◆ RIPENESS <span class="' + VITAL_CLASS.ripeness[r.state] + '">' +
+      r.state.toUpperCase() + '</span></div>' + vitalRows(r.inputs);
+  }
+  const h = s && s.health;
+  if (h && h.state) {
+    html += '<div class="d-hd">◆ HEALTH <span class="' + VITAL_CLASS.health[h.state] + '">' +
+      h.state.toUpperCase() + '</span></div>' + vitalRows(h.inputs);
+  }
+  return html ? '<div class="vitals-detail">' + html + '</div>' : '';
+}

@@ -26,6 +26,7 @@ import {
   GLYPH_GRAPH_R, glyphGraphConfig, glyphGraphPins, graphRectToMinimap,
   NODE_RADII,
   projectGlyphMarkup, projectGlyphSvg, projectGlyphFieldSvg,
+  vitalsLineHtml, vitalsDetailHtml, VITAL_CLASS,
 } from '../experience/client-core.mjs';
 
 test('fmtTok — M/k/plain formatting', () => {
@@ -1242,4 +1243,74 @@ test('generateUsageShareCardSVG — constellation: one hex per project over one 
   const overflowSvg = generateUsageShareCardSVG(buildUsageShareCardData(meGlyph([]), { projects: manyProjects, sessions: manySessions }));
   assert.ok(overflowSvg.includes('+5 projects'), '65 projects, 60-cap → 5 overflow');
   assert.ok(overflowSvg.includes('+5 sessions'), '205 sessions, 200-cap → 5 overflow');
+});
+
+// ── Session vitals (/now phase · ripeness · health) ──────────────────────────
+
+function vs(over = {}) {
+  return {
+    phase: 'think', time_in_phase_s: 134,
+    lead_in: { turns: 1, tool_calls: 6 },
+    ripeness: { state: 'ripe', inputs: [
+      { id: 'lead_in_turns', value: 1, verdict: 'ok', note: '1–3 thinking turns' },
+      { id: 'cache', value: 'cold', verdict: 'warn', note: 'idle 400s', est_rewrite_tokens: 214_000 },
+    ] },
+    health: { state: 'strained', inputs: [
+      { id: 'compacts', value: 2, verdict: 'warn', note: 'context compactions this session' },
+      { id: 'cache_hit', value: null, verdict: 'na', note: 'no cache counters' },
+    ] },
+    ...over,
+  };
+}
+
+test('VITAL_CLASS — every state maps to a class (color is grammar, CSS owns hues)', () => {
+  for (const p of ['think', 'do', 'verify']) assert.ok(VITAL_CLASS.phase[p]);
+  for (const r of ['fresh', 'ripening', 'ripe', 'overripe', 'stalled']) assert.ok(VITAL_CLASS.ripeness[r]);
+  for (const h of ['ok', 'strained', 'degraded', 'unknown']) assert.ok(VITAL_CLASS.health[h]);
+});
+
+test('vitalsLineHtml — phase, time in phase, ripeness, lead-in, health', () => {
+  const h = vitalsLineHtml(vs(), { phase: true });
+  assert.match(h, /class="vitals"/);
+  assert.match(h, /THINK/);
+  assert.match(h, /2m14s/);
+  assert.match(h, /RIPE\b/);
+  assert.match(h, /1t · 6 tools/);
+  assert.match(h, /STRAINED/);
+  assert.match(h, new RegExp(VITAL_CLASS.phase.think));
+});
+
+test('vitalsLineHtml — no ripeness while doing', () => {
+  const h = vitalsLineHtml(vs({ phase: 'do', ripeness: { state: null, inputs: [] } }), { phase: true });
+  assert.match(h, /DO/);
+  assert.doesNotMatch(h, /RIPE/);
+});
+
+test('vitalsLineHtml — capability off: PHASE — and no guessed ripeness; health stays', () => {
+  const h = vitalsLineHtml(vs(), { phase: false });
+  assert.match(h, /PHASE <span class="v-dim">—<\/span>/);
+  assert.doesNotMatch(h, /RIPE/);
+  assert.match(h, /STRAINED/);
+});
+
+test('vitalsLineHtml — old snapshot without vitals renders nothing', () => {
+  assert.equal(vitalsLineHtml({}, {}), '');
+});
+
+test('vitalsDetailHtml — lists every input row with verdict glyph, value, note', () => {
+  const h = vitalsDetailHtml(vs(), { phase: true });
+  assert.match(h, /◆ RIPENESS/);
+  assert.match(h, /◆ HEALTH/);
+  assert.match(h, /lead in turns/);
+  assert.match(h, /cold · ≈214k rewrite/);
+  assert.match(h, /cache hit/);
+  assert.match(h, /v-warn/);
+  assert.match(h, /v-na/);
+});
+
+test('vitalsDetailHtml — escapes values and notes', () => {
+  const s = vs({ health: { state: 'ok', inputs: [{ id: 'api_error', value: '<x>', verdict: 'bad', note: 'a<b' }] } });
+  const h = vitalsDetailHtml(s, { phase: true });
+  assert.ok(!h.includes('<x>'));
+  assert.match(h, /&lt;x&gt;/);
 });
