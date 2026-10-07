@@ -62,6 +62,13 @@ test('shellIntent — stderr/null redirects are not writes', () => {
   assert.equal(shellIntent('node --test > /dev/null'), 'verify');
 });
 
+test('shellIntent — > inside quotes or arrows is not a redirect', () => {
+  assert.equal(shellIntent('node -e "setTimeout(()=>{},1500)"'), 'read');
+  assert.equal(shellIntent("node -e 'process.stdout.write(a > b ? 1 : 0)'"), 'read');
+  assert.equal(shellIntent('grep -n "a -> b" notes.md'), 'read');
+  assert.equal(shellIntent('node -e "x" > out.json'), 'mutate');
+});
+
 test('shellIntent — PowerShell cmdlets (Windows sessions)', () => {
   assert.equal(shellIntent('New-Item -ItemType Directory out'), 'mutate');
   assert.equal(shellIntent('Remove-Item -Recurse dist'), 'mutate');

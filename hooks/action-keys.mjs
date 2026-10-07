@@ -84,8 +84,10 @@ const VERIFY_RES = [
   /^npx\s+(tsc|jest|vitest|playwright|mocha|eslint)\b/,
 ];
 
-// `> file` / `>> file`, but not `2>…`, `>&…`, or `> /dev/null` / `$null`.
-const WRITE_REDIRECT = /(^|[^0-9&>])>{1,2}\s*(?!&|\/dev\/null\b|\$null\b|nul\b)\S/i;
+// `> file` / `>> file`, but not `2>…`, `>&…`, `=>` / `->` arrows, or
+// `> /dev/null` / `$null`. Quoted text is blanked before this runs.
+const WRITE_REDIRECT = /(^|[^0-9&>=\-])>{1,2}\s*(?!&|\/dev\/null\b|\$null\b|nul\b)\S/i;
+const QUOTED = /"(?:\\.|[^"\\])*"|'[^']*'/g;
 
 const RANK = { read: 0, verify: 1, mutate: 2 };
 
@@ -108,7 +110,8 @@ export function shellIntent(command) {
   const cmd = Array.isArray(command) ? command.join(' ') : command;
   if (typeof cmd !== 'string' || !cmd.trim()) return null;
   let best = null;
-  for (const seg of cmd.split(/&&|\|\||;|\|/)) {
+  // inline scripts (node -e "…=>…", echo "rm -rf") are arguments, not commands
+  for (const seg of cmd.replace(QUOTED, '""').split(/&&|\|\||;|\|/)) {
     const i = segmentIntent(seg);
     if (i && (best === null || RANK[i] > RANK[best])) best = i;
   }
