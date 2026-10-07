@@ -111,3 +111,12 @@ test('trace-capable file harnesses expose locateSession', () => {
     assert.equal(typeof getHarness(id).locateSession, 'function', `${id}: locateSession`);
   }
 });
+
+test('every descriptor declares capabilities.phase (shell command text available → think/do/verify)', () => {
+  for (const h of HARNESS_REGISTRY) {
+    assert.equal(typeof h.capabilities.phase, 'boolean', `${h.id}: capabilities.phase`);
+  }
+  // copilot tool_use carries category:null and no command text — intent would be guessed
+  assert.equal(getHarness('copilot').capabilities.phase, false);
+  assert.equal(getHarness('claude-code').capabilities.phase, true);
+});
