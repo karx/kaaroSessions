@@ -280,3 +280,102 @@ test('applyPulse — permission / mode_shift / api_error update session fields',
   assert.equal(s.last_api_error.message, 'quota exceeded');
   assert.equal(s.last_api_error.code, 'rate_limit');
 });
+
+// ── phase / lead-in / ripeness / health (RFC-session-triggers) ───────────────
+
+const tc = (intent, extra = {}) => pulse('tool_call', { tool: 'Bash', key: 'bash_other', intent, ...extra });
+const prompt = () => pulse('human_turn', { text: null, prompt: true });
+
+test('phase — current round decides: do > verify > think; null before any work', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  assert.equal(snapshotActive(st, T0).sessions[0].phase, null);
+  applyPulse(st, tc('read'), T0 + 1000);
+  assert.equal(snapshotActive(st, T0 + 1000).sessions[0].phase, 'think');
+  applyPulse(st, tc('verify'), T0 + 2000);
+  assert.equal(snapshotActive(st, T0 + 2000).sessions[0].phase, 'verify');
+  applyPulse(st, tc('mutate'), T0 + 3000);
+  const s = snapshotActive(st, T0 + 5000).sessions[0];
+  assert.equal(s.phase, 'do');
+  assert.equal(s.time_in_phase_s, 2);
+});
+
+test('phase — an empty new round keeps the previous phase until work arrives', () => {
+  const st = createActiveState();
+  applyPulse(st, tc('mutate'), T0);
+  applyPulse(st, prompt(), T0 + 1000);
+  assert.equal(snapshotActive(st, T0 + 1000).sessions[0].phase, 'do');
+  applyPulse(st, tc('read'), T0 + 2000);
+  assert.equal(snapshotActive(st, T0 + 2000).sessions[0].phase, 'think');
+});
+
+test('tool_result-only human_turn rows (prompt:false) do not open a round', () => {
+  const st = createActiveState();
+  applyPulse(st, tc('read'), T0);
+  applyPulse(st, pulse('human_turn', { prompt: false }), T0 + 100);
+  applyPulse(st, tc('read'), T0 + 200);
+  const s = snapshotActive(st, T0 + 300).sessions[0];
+  assert.equal(s.lead_in.turns, 1);
+  assert.equal(s.lead_in.tool_calls, 2);
+});
+
+test('lead-in — counts thinking rounds since the last DO; DO resets it', () => {
+  const st = createActiveState();
+  applyPulse(st, tc('mutate'), T0);
+  for (let i = 1; i <= 3; i++) {
+    applyPulse(st, prompt(), T0 + i * 10_000);
+    applyPulse(st, tc('read'), T0 + i * 10_000 + 1000);
+  }
+  let s = snapshotActive(st, T0 + 40_000).sessions[0];
+  assert.equal(s.lead_in.turns, 3);
+  assert.equal(s.lead_in.tool_calls, 3);
+  applyPulse(st, prompt(), T0 + 50_000);
+  applyPulse(st, tc('mutate'), T0 + 51_000);
+  s = snapshotActive(st, T0 + 52_000).sessions[0];
+  assert.equal(s.lead_in.turns, 0);
+  assert.equal(s.ripeness.state, null);
+});
+
+test('ripeness — ripe after one thinking round and a 60s human pause', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read', { where: 'RFC-session-triggers.md' }), T0 + 1000);
+  applyPulse(st, pulse('words', { preview: 'here is the plan', word_count: 4 }), T0 + 2000);
+  const s = snapshotActive(st, T0 + 62_000).sessions[0];
+  assert.equal(s.ripeness.state, 'ripe');
+  assert.equal(s.ripeness.inputs.find(i => i.id === 'pause_s').value, 60);
+  assert.equal(s.ripeness.inputs.find(i => i.id === 'plan_ref').value, true);
+});
+
+test('ripeness — cache input appears only after real cache counters were seen', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read'), T0 + 1000);
+  applyPulse(st, pulse('tokens', { synthetic: true, output: 10 }), T0 + 1000);
+  assert.equal(snapshotActive(st, T0 + 2000).sessions[0]
+    .ripeness.inputs.find(i => i.id === 'cache').verdict, 'na');
+  applyPulse(st, pulse('tokens', { input: 5, output: 100, cache_create: 2_000, cache_read: 40_000 }), T0 + 2000);
+  const s = snapshotActive(st, T0 + 2000 + 400_000).sessions[0];
+  const c = s.ripeness.inputs.find(i => i.id === 'cache');
+  assert.equal(c.value, 'cold');
+  assert.equal(c.est_rewrite_tokens, 42_005);
+  assert.equal(s.ripeness.state, 'overripe');
+});
+
+test('ripeness — api error after the last agent activity → stalled; health degraded', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read'), T0 + 1000);
+  applyPulse(st, pulse('api_error', { message: 'limit reached', code: 'session_limit' }), T0 + 2000);
+  const s = snapshotActive(st, T0 + 3000).sessions[0];
+  assert.equal(s.ripeness.state, 'stalled');
+  assert.equal(s.health.state, 'degraded');
+});
+
+test('health — snapshot carries state + inputs from the recent-actions ring', () => {
+  const st = createActiveState();
+  for (let i = 0; i < 6; i++) applyPulse(st, tc('read'), T0 + i);
+  const s = snapshotActive(st, T0 + 10).sessions[0];
+  assert.equal(s.health.state, 'ok');
+  assert.ok(s.health.inputs.some(i => i.id === 'tool_error_rate'));
+});
