@@ -720,8 +720,41 @@
 
   function buildSynthTab(body) {
     const S2 = window.AUDIO_SETTINGS || {};
+    function appendHeading(text, spaced = false) {
+      const heading = document.createElement('div');
+      heading.className = 'sec-head';
+      heading.textContent = text;
+      if (spaced) heading.style.marginTop = '10px';
+      body.appendChild(heading);
+    }
+    function octaveInput(title, value, change) {
+      const input = document.createElement('input');
+      input.type = 'number'; input.className = 'inp octave-inp';
+      input.min = '-3'; input.max = '3'; input.step = '1';
+      input.title = title; input.ariaLabel = title;
+      input.value = String(value ?? 0);
+      input.oninput = () => {
+        if (input.value === '') return;
+        const value = Number(input.value);
+        if (Number.isInteger(value) && value >= -3 && value <= 3) change(value);
+      };
+      input.onchange = () => {
+        const octave = Math.max(-3, Math.min(3, Math.round(Number(input.value) || 0)));
+        input.value = String(octave);
+        change(octave);
+      };
+      return input;
+    }
 
-    body.innerHTML += '<div class="sec-head">Instruments</div>';
+    const overallRow = document.createElement('div'); overallRow.className = 'row';
+    const overallLabel = document.createElement('label'); overallLabel.textContent = 'overall octave';
+    overallRow.appendChild(overallLabel);
+    overallRow.appendChild(octaveInput('Overall octave', S2.octave, octave => {
+      window.updateAudioSettings?.({ octave });
+    }));
+    body.appendChild(overallRow);
+
+    appendHeading('Instruments');
     const instTable = document.createElement('div');
     SYNTH_KEYS.forEach(([key, label]) => {
       const row = document.createElement('div'); row.className = 'inst-row';
@@ -734,13 +767,17 @@
         if (window.updateAudioSettings) window.updateAudioSettings(patch);
       };
       const prev = document.createElement('button'); prev.className = 'btn inst-prev'; prev.textContent = '▶';
-      prev.onclick = () => { if (window.previewInstrument) window.previewInstrument(sel.value); };
-      row.appendChild(lbl); row.appendChild(sel); row.appendChild(prev);
+      prev.title = `Preview ${label}`; prev.ariaLabel = `Preview ${label}`;
+      prev.onclick = () => { if (window.previewInstrument) window.previewInstrument(sel.value, key); };
+      const octave = octaveInput(`${label} octave`, S2.octaves?.[key], value => {
+        window.updateAudioSettings?.({ octaves: { [key]: value } });
+      });
+      row.appendChild(lbl); row.appendChild(sel); row.appendChild(octave); row.appendChild(prev);
       instTable.appendChild(row);
     });
     body.appendChild(instTable);
 
-    body.innerHTML += '<div class="sec-head" style="margin-top:10px">Scale · Note</div>';
+    appendHeading('Scale · Note', true);
 
     const scaleRow = document.createElement('div'); scaleRow.className = 'row';
     scaleRow.innerHTML = '<label>scale</label>';
@@ -766,7 +803,7 @@
     noteSel.onchange = () => { if (window.updateAudioSettings) window.updateAudioSettings({ noteMode: noteSel.value }); };
     noteRow.appendChild(noteSel); body.appendChild(noteRow);
 
-    body.innerHTML += '<div class="sec-head" style="margin-top:10px">Metronome</div>';
+    appendHeading('Metronome', true);
     const clickRow = document.createElement('div'); clickRow.className = 'row';
     clickRow.innerHTML = '<label>click track</label>';
     const clickBtn = document.createElement('button');
@@ -851,7 +888,7 @@
   }
 
   // ── Built-in presets ──────────────────────────────────────────────────────────
-  // Three opinionated presets. Every event key is mapped; all 5 sonic axes covered.
+  // Built-in listening profiles.
   //
   // Design principles encoded:
   //   Cognitive Flow  — timbre=category, velocity=importance, path-hash=file identity
@@ -859,6 +896,38 @@
   //   Session Arc     — multi-scale: tools=micro, token-bursts=mid chord, words=macro melody
 
   const DAW_PRESETS = [
+    {
+      name: 'Calm Groove',
+      tag: 'Dorian · Warm harp · Gentle rhythm',
+      desc: 'Warm harp, bass and low bells with soft snares and hats. Random Dorian notes.',
+      settings: {
+        scale: 'dorian', noteMode: 'random', octave: 0, clickTrack: false,
+        instruments: {
+          read:'hat', write:'bass', edit:'pling',
+          bash_git:'harp', bash_run:'harp', bash_other:'hat',
+          grep_glob:'snare', agent:'bell', other:'kick',
+          tokens:'snare', words:'hat',
+        },
+        octaves: {
+          read:-2, write:0, edit:-1,
+          bash_git:0, bash_run:1, bash_other:0,
+          grep_glob:0, agent:-1, other:0, tokens:0, words:0,
+        },
+      },
+      mappings: [
+        { match: { key:'read' }, set: { volMult:1 } },
+        { match: { key:'write' }, set: { volMult:1 } },
+        { match: { key:'edit' }, set: { volMult:1 } },
+        { match: { key:'bash_git' }, set: { volMult:1 } },
+        { match: { key:'bash_run' }, set: { volMult:1 } },
+        { match: { key:'bash_other' }, set: { volMult:1 } },
+        { match: { key:'grep_glob' }, set: { volMult:1 } },
+        { match: { key:'agent' }, set: { volMult:1 } },
+        { match: { key:'other' }, set: { volMult:1 } },
+        { match: { key:'tokens' }, set: { volMult:1 } },
+        { match: { key:'words' }, set: { volMult:1 } },
+      ],
+    },
     {
       name: 'Cognitive Flow',
       tag:  'Pre-attentive · Identity · Sustainable',
@@ -961,7 +1030,14 @@
   ];
 
   function applyPreset(preset) {
-    if (window.updateAudioSettings) window.updateAudioSettings(preset.settings);
+    if (window.updateAudioSettings) window.updateAudioSettings({
+      ...preset.settings,
+      octave: preset.settings.octave ?? 0,
+      octaves: {
+        ...Object.fromEntries(Object.keys(window.AUDIO_SETTINGS?.octaves || {}).map(key => [key, 0])),
+        ...(preset.settings.octaves || {}),
+      },
+    });
     if (window.updateAudioProfile)  window.updateAudioProfile({ mappings: preset.mappings });
     // Sync header BPM display
     const bpmSlider = document.getElementById('daw-bpm');

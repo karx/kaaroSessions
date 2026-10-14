@@ -45,10 +45,13 @@
       thinking: 'bell',
     },
     scale:       'major_pentatonic',
+    octave:      0,
+    octaves:     {},
     noteMode:    'path_hash',
     bpm:         120,
     beatsPerBar: 4,
     clickTrack:  false,
+    soundEnabled: false,
     clickVol:    0.15,
     filter: { mutedFamilies: [], mutedProjects: [] },
   };
@@ -61,6 +64,7 @@
       return {
         ...DEFAULT_SETTINGS, ...s,
         instruments: { ...DEFAULT_SETTINGS.instruments, ...(s.instruments || {}) },
+        octaves:     { ...(s.octaves || {}) },
         filter:      { ...DEFAULT_SETTINGS.filter,      ...(s.filter || {}) },
       };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); }
@@ -103,11 +107,16 @@
 
   window.updateAudioSettings = function (patch) {
     if (patch.instruments) Object.assign(window.AUDIO_SETTINGS.instruments, patch.instruments);
+    if (patch.octaves) Object.assign(window.AUDIO_SETTINGS.octaves, patch.octaves);
     if (patch.filter)      Object.assign(window.AUDIO_SETTINGS.filter, patch.filter);
     const rest = Object.fromEntries(
-      Object.entries(patch).filter(([k]) => k !== 'instruments' && k !== 'filter')
+      Object.entries(patch).filter(([k]) => k !== 'instruments' && k !== 'filter' && k !== 'octaves')
     );
     Object.assign(window.AUDIO_SETTINGS, rest);
+    const profilePatch = Object.fromEntries(
+      ['scale', 'noteMode', 'bpm'].filter(key => key in patch).map(key => [key, patch[key]])
+    );
+    if (Object.keys(profilePatch).length) window.updateAudioProfile(profilePatch);
     try { localStorage.setItem('kaaro-audio-settings', JSON.stringify(window.AUDIO_SETTINGS)); } catch {}
   };
 
@@ -248,6 +257,7 @@
       break;
     }
 
+    octave += Number(S.octaves?.[key]) || 0;
     const tmb = (P.timbre && P.timbre[instrument]) || {};
     const fam = key ? (TOOL_FAMILY[key] || null) : null;
     if (instrument && instrument !== 'off' && !['harp','bass','bell','flute','bit','pling','snare','kick','hat','buzz'].includes(instrument)) {
@@ -259,7 +269,7 @@
   window.resolveSonicForEvent = resolveSonic;
 
   // ── AudioContext + master bus ─────────────────────────────────────────────────
-  let _ac = null, muted = true;
+  let _ac = null, muted = !window.AUDIO_SETTINGS.soundEnabled;
   let _masterGain, _masterFilter, _reverbConvolver, _reverbReturn, _masterBusReady = false;
 
   function _setupMasterBus(c) {
@@ -339,7 +349,8 @@
   function noteHz(project, degree, octaveShift) {
     const iv  = activeIv();
     const idx = ((degree % iv.length) + iv.length) % iv.length;
-    return midiToHz(projectRoot(project) + iv[idx] + (octaveShift || 0) * 12);
+    const overall = Number(window.AUDIO_SETTINGS.octave) || 0;
+    return midiToHz(projectRoot(project) + iv[idx] + ((octaveShift || 0) + overall) * 12);
   }
 
   function strHash(s) {
@@ -535,14 +546,17 @@
   }
 
   function snare(c, at, vol, out) {
-    vol = vol ?? 0.32;
+    vol = (vol ?? 0.32) * 0.75;
     const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.12), c.sampleRate);
     const d   = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     const src = c.createBufferSource(); src.buffer = buf;
-    const f   = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1200;
+    const f   = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 650;
+    const soften = c.createBiquadFilter(); soften.type = 'lowpass'; soften.frequency.value = 3200; soften.Q.value = 0.5;
     const g   = c.createGain();
-    g.gain.setValueAtTime(vol, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
-    src.connect(f); f.connect(g); g.connect(out); src.start(at); src.stop(at + 0.12);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
+    src.connect(f); f.connect(soften); soften.connect(g); g.connect(out); src.start(at); src.stop(at + 0.12);
   }
 
   function kick(c, at, vol, out) {
@@ -586,12 +600,14 @@
     snare: 0.12, kick: 0.25, hat: 0.04, buzz: 0.27,
   };
 
-  window.previewInstrument = function (name) {
+  window.previewInstrument = function (name, key) {
     const fn = INSTS[name]; if (!fn) return;
     const c  = ac(); if (!c || !_masterGain) return;
     const at = c.currentTime + 0.05;
     const tmpOut = c.createGain(); tmpOut.gain.value = 1; tmpOut.connect(_masterGain);
-    PERC.has(name) ? fn(c, at, undefined, tmpOut) : fn(c, at, midiToHz(64), undefined, tmpOut);
+    const event = key === 'tokens' || key === 'words' ? key : 'tool_call';
+    const octave = key ? resolveSonic(event, { key }).octave : 0;
+    PERC.has(name) ? fn(c, at, undefined, tmpOut) : fn(c, at, noteHz(null, 0, octave), undefined, tmpOut);
   };
 
   // ── Beat ring buffer (shared reference — mutate in place) ─────────────────────
@@ -718,24 +734,39 @@
     btn.id    = 'sound-btn';
     btn.title = 'Toggle pulse sounds';
     btn.style.cssText = 'position:fixed;top:8px;right:110px;background:'+KAARO_TOKENS.card+';color:'+KAARO_TOKENS.dim+';font:bold 10px \'IBM Plex Mono\',monospace;padding:3px 9px;z-index:9998;cursor:pointer;user-select:none;border:1px solid '+KAARO_TOKENS.border+';transition:color .15s,background .15s,border-color .15s;letter-spacing:1px';
-    btn.textContent = '♪ OFF';
     document.body.appendChild(btn);
-    btn.addEventListener('click', () => {
-      muted = !muted;
+    function syncSoundButton() {
+      btn.textContent = muted ? '♪ OFF' : '♪ ON';
+      btn.style.color = muted ? KAARO_TOKENS.dim : '#00ff88';
+      btn.style.background = muted ? KAARO_TOKENS.card : '#061a0e';
+      btn.style.borderColor = muted ? KAARO_TOKENS.border : '#1a4a2a';
+    }
+    function setMuted(value) {
+      muted = !!value;
+      window.updateAudioSettings({ soundEnabled: !muted });
       if (!muted) {
         ac();
         if (window.AUDIO_SETTINGS.clickTrack) _startClick();
-        btn.textContent = '♪ ON';  btn.style.color = '#00ff88'; btn.style.background = '#061a0e'; btn.style.borderColor = '#1a4a2a';
       } else {
         _stopClick();
-        btn.textContent = '♪ OFF'; btn.style.color = KAARO_TOKENS.dim; btn.style.background = KAARO_TOKENS.card; btn.style.borderColor = KAARO_TOKENS.border;
       }
-    });
+      syncSoundButton();
+    }
+    syncSoundButton();
+    btn.addEventListener('click', () => setMuted(!muted));
+    // A saved ON choice still needs a user gesture in browsers that block autoplay.
+    const unlockAudio = () => {
+      if (muted) return;
+      ac();
+      if (window.AUDIO_SETTINGS.clickTrack && !_clickTimer) _startClick();
+    };
+    document.addEventListener('pointerdown', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
     // Expose muted state + toggle for DAW builder's own mute button
     window._getAudioMuted  = () => muted;
     window._setAudioMuted  = (v) => {
       if (v === muted) return;
-      btn.click(); // reuse the logic above
+      setMuted(v);
     };
   }
 

@@ -231,7 +231,7 @@
   window._apPreview = function(key) {
     const name = (window.AUDIO_SETTINGS?.instruments||{})[key]||'harp';
     if (name==='off') return;
-    if (window.previewInstrument) window.previewInstrument(name);
+    if (window.previewInstrument) window.previewInstrument(name, key);
   };
 
   window._apFamPreview = function(famId) {
