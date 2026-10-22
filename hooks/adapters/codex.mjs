@@ -6,6 +6,7 @@
 
 import { categorizeBash } from '../helpers/analyze-helpers.mjs';
 import { isBashToolName } from '../action-keys.mjs';
+import { finalTurnSignal, inputToolSignal } from '../helpers/turn-signals.mjs';
 
 const HARNESS = 'codex';
 
@@ -125,6 +126,9 @@ export function recordsToNormalized(records) {
     }
 
     if (rec.type === 'event_msg') {
+      if (payload.type === 'task_complete') {
+        out.push(finalTurnSignal(payload.last_agent_message, HARNESS, ts, payload.turn_id || payload.root_turn_id));
+      }
       if (payload.type === 'token_count') {
         const tokens = tokenUsage(payload);
         if (tokens) out.push({ kind: 'tokens', harness: HARNESS, ts, tokens });
@@ -172,6 +176,8 @@ export function recordsToNormalized(records) {
     }
 
     if (payload.type === 'function_call') {
+      const signal = inputToolSignal(payload.name || '', payload.call_id, HARNESS, ts);
+      if (signal) out.push(signal);
       const args = parseArguments(payload.arguments);
       const command = commandFromArgs(args);
       const input = { ...args };
@@ -208,6 +214,8 @@ export function recordsToNormalized(records) {
     // custom_tool_call/custom_tool_call_output pair (verified against live
     // rollouts). apply_patch is the only known name so far.
     if (payload.type === 'custom_tool_call') {
+      const signal = inputToolSignal(payload.name || '', payload.call_id, HARNESS, ts);
+      if (signal) out.push(signal);
       const tool = payload.name || 'unknown';
       if (payload.call_id) toolByCallId.set(payload.call_id, tool);
       out.push({

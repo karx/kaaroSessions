@@ -482,6 +482,7 @@
   // ── MAP tab ───────────────────────────────────────────────────────────────────
   const MATCH_FAMILIES = ['file', 'system', 'ai', 'context'];
   const MATCH_KEYS = [
+    'turn_complete', 'input_required',
     'read', 'write', 'edit', 'grep_glob',
     'bash_git', 'bash_run', 'bash_other',
     'agent', 'other', 'web', 'tokens', 'words', 'chirp',
@@ -716,6 +717,7 @@
     ['bash_git','Bash (git)'], ['bash_run','Bash (run)'], ['bash_other','Bash (other)'],
     ['grep_glob','Grep/Glob'], ['agent','Agent'], ['other','Other'],
     ['tokens','Tokens'], ['words','Words'],
+    ['turn_complete','Turn Complete'], ['input_required','Input Required'],
   ];
 
   function buildSynthTab(body) {
@@ -825,6 +827,7 @@
       <div class="row"><label>type</label>
         <select id="sim-type" class="inp">
           <option>tool_call</option><option>tokens</option><option>words</option>
+          <option>turn_complete</option><option>input_required</option>
         </select>
       </div>
       <div class="row"><label>harness</label>
@@ -1032,6 +1035,7 @@
   function applyPreset(preset) {
     if (window.updateAudioSettings) window.updateAudioSettings({
       ...preset.settings,
+      instruments: { turn_complete: 'bell', input_required: 'pling', ...preset.settings.instruments },
       octave: preset.settings.octave ?? 0,
       octaves: {
         ...Object.fromEntries(Object.keys(window.AUDIO_SETTINGS?.octaves || {}).map(key => [key, 0])),
@@ -1246,6 +1250,11 @@
     }
     try {
       const es = new EventSource('/events');
+      for (const event of ['turn_complete', 'input_required']) {
+        es.addEventListener(event, e => {
+          try { window.playPulse?.(event, JSON.parse(e.data)); } catch {}
+        });
+      }
       es.addEventListener('tool_call', e => { try { if (window.playPulse) window.playPulse('tool_call', JSON.parse(e.data)); } catch {} });
       es.addEventListener('tokens',    e => { try { if (window.playPulse) window.playPulse('tokens',    JSON.parse(e.data)); } catch {} });
       es.addEventListener('words',     e => { try { if (window.playPulse) window.playPulse('words',     JSON.parse(e.data)); } catch {} });

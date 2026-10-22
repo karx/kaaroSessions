@@ -57,6 +57,9 @@ function transformRecord(nr, ctx, capabilities) {
   }
 
   switch (disp.event) {
+    case 'turn_complete':
+    case 'input_required':
+      return { event: disp.event, data: { ...env, signal_id: nr.signal_id, reason: nr.reason } };
 
     case 'tool_call': {
       const key   = toolNameToKey(nr.tool, nr.category);

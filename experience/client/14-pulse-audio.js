@@ -23,7 +23,7 @@
     { id: 'file',    label: 'File Ops', color: '#2a6a2a', tools: ['read', 'write', 'edit', 'grep_glob'] },
     { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other'] },
     { id: 'ai',      label: 'AI',       color: '#6a2a7a', tools: ['agent', 'other', 'web'] },
-    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking'] },
+    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required'] },
   ];
 
   const TOOL_FAMILY = {};
@@ -34,6 +34,7 @@
   // ── Default settings ──────────────────────────────────────────────────────────
   const DEFAULT_SETTINGS = {
     instruments: {
+      turn_complete: 'bell', input_required: 'pling',
       read: 'harp', write: 'bass', edit: 'pling',
       bash_git: 'snare', bash_run: 'hat', bash_other: 'kick',
       grep_glob: 'bit', agent: 'bell', other: 'harp',
@@ -140,6 +141,8 @@
 
   // ── Spatial defaults per action key ──────────────────────────────────────────
   const SPATIAL = {
+    turn_complete: { pan: 0, sendAmt: 0.12, brightness: 3500 },
+    input_required: { pan: 0, sendAmt: 0.10, brightness: 5500 },
     write:      { pan: -0.15, sendAmt: 0.05, brightness: 10000 },
     edit:       { pan: -0.10, sendAmt: 0.05, brightness: 9000  },
     read:       { pan:  0.05, sendAmt: 0.06, brightness: 7000  },
@@ -174,6 +177,8 @@
   // ── Sonic resolution (all axes) ───────────────────────────────────────────────
   // Cognition events: instrument/octave/volume profile (spatial axes in SPATIAL)
   const COG_SOUND = {
+    turn_complete: { instrument: 'bell', octave: -1, volMult: 0.7 },
+    input_required: { instrument: 'pling', octave: 0, volMult: 0.85 },
     tool_error: { instrument: 'buzz',  octave: -1, volMult: 1.10 },
     api_error:  { instrument: 'buzz',  octave: -2, volMult: 1.40 },
     human_turn: { instrument: 'bell',  octave: -1, volMult: 0.90 },
@@ -369,6 +374,19 @@
     return where ? strHash(where) % iv.length : 0;
   }
 
+  function notificationNotes(event, project, octaveShift, scale) {
+    if (event !== 'turn_complete' && event !== 'input_required') return null;
+    const iv = SCALES[scale] || activeIv();
+    const degrees = event === 'turn_complete' ? [0, 2, 4, 6] : [6, 4, 2, 0];
+    const overall = Number(window.AUDIO_SETTINGS.octave) || 0;
+    const root = projectRoot(project) + ((octaveShift || 0) + overall) * 12;
+    const step = 30 / (window.AUDIO_SETTINGS.bpm || 120);
+    return degrees.map((degree, i) => ({
+      hz: midiToHz(root + iv[degree % iv.length] + Math.floor(degree / iv.length) * 12),
+      offset: i * step,
+    }));
+  }
+
   // ── Beat scheduler ────────────────────────────────────────────────────────────
   // 80 ms batch, then snap onto the next beat (musical grid).
   let _beatAt = 0, _barBeat = 0, _batchBuf = [], _batchTimer = null;
@@ -380,10 +398,14 @@
     const buf = _batchBuf.splice(0);
     const c   = ac(); if (!c) return;
     const now = c.currentTime;
+    // Keep alert phrases intact: burst reduction must not drop their notes.
+    const phrases = buf.filter(v => v.notes);
+    const ordinary = buf.filter(v => !v.notes);
     const scale = SCALES[window.AUDIO_SETTINGS?.scale] || SCALES.major_pentatonic;
     const { audible } = (typeof coalesceVoices === 'function')
-      ? coalesceVoices(buf, { scale })
-      : { audible: buf };
+      ? coalesceVoices(ordinary, { scale })
+      : { audible: ordinary };
+    const scheduled = [...audible, ...phrases];
 
     const bd = 60 / (window.AUDIO_SETTINGS.bpm || 120);
     if (_beatAt < now + 0.02) { _beatAt = now + 0.02; _barBeat = 0; }
@@ -391,13 +413,18 @@
     _barBeat = (_barBeat + 1) % (window.AUDIO_SETTINGS.beatsPerBar || 4);
     _beatAt += bd;
 
-    const stagger = Math.min(0.012, 0.04 / Math.max(1, audible.length - 1));
+    const stagger = Math.min(0.012, 0.04 / Math.max(1, scheduled.length - 1));
     // Audio sink only: heardAt is the oscillator clock. The viz sink already
     // owns the ring entry (arrival ts). Do not rewrite ts — that jumps the block.
     for (const v of buf) {
       if (v.meta?.ringEv) v.meta.ringEv.heardAt = at;
     }
-    audible.forEach((v, i) => startVoice(c, at + i * stagger, v));
+    scheduled.forEach((v, i) => {
+      const start = at + i * stagger;
+      if (v.notes) {
+        for (const note of v.notes) startVoice(c, start + note.offset, { ...v, hz: note.hz });
+      } else startVoice(c, start, v);
+    });
   }
 
   // ── Per-voice signal chain ────────────────────────────────────────────────────
@@ -405,10 +432,10 @@
   window._scheduledVoices = [];
   window._getAudioNow = () => (_ac ? _ac.currentTime : 0);
 
-  function schedVoice(name, hz, vol, sonic, meta) {
+  function schedVoice(name, hz, vol, sonic, meta, notes = null) {
     const mixerGain = (window.MIXER_GAINS && sonic.fam) ? (window.MIXER_GAINS[sonic.fam] ?? 1) : 1;
     const finalVol  = (vol != null ? vol : 0.42) * mixerGain;
-    _batchBuf.push({ name, hz, vol: finalVol, sonic, meta });
+    _batchBuf.push({ name, hz, vol: finalVol, sonic, meta, notes });
     if (!ac()) return; // viz already has the pulse; no oscillator to arm
     if (!_batchTimer) _batchTimer = setTimeout(_flushBatch, BATCH_MS);
   }
@@ -605,9 +632,15 @@
     const c  = ac(); if (!c || !_masterGain) return;
     const at = c.currentTime + 0.05;
     const tmpOut = c.createGain(); tmpOut.gain.value = 1; tmpOut.connect(_masterGain);
-    const event = key === 'tokens' || key === 'words' ? key : 'tool_call';
-    const octave = key ? resolveSonic(event, { key }).octave : 0;
-    PERC.has(name) ? fn(c, at, undefined, tmpOut) : fn(c, at, noteHz(null, 0, octave), undefined, tmpOut);
+    const event = key === 'tokens' || key === 'words' || COG_SOUND[key] ? key : 'tool_call';
+    const sonic = key ? resolveSonic(event, { key }) : null;
+    const octave = sonic?.octave || 0;
+    const notes = notificationNotes(key, null, octave, sonic?.scale)
+      || [{ hz: noteHz(null, 0, octave), offset: 0 }];
+    for (const note of notes) {
+      PERC.has(name) ? fn(c, at + note.offset, undefined, tmpOut)
+        : fn(c, at + note.offset, note.hz, undefined, tmpOut);
+    }
   };
 
   // ── Beat ring buffer (shared reference — mutate in place) ─────────────────────
@@ -626,6 +659,7 @@
   // Cognition events ride the same ring + audio path: structural/human signals
   // with registry-defined sonic profiles (W-COG surfacing).
   const COGNITION_EVENTS = new Set([
+    'turn_complete', 'input_required',
     'human_turn', 'compact', 'permission', 'mode_shift',
     'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
     'thinking', 'unknown',
@@ -723,7 +757,8 @@
         if (!passesFilter(r.key, data.project)) return;
         const name = r.instrument; if (name === 'off') return;
         const hz = noteHz(data.project, 0, r.octave || 0);
-        schedVoice(name, hz, 0.12 * r.volMult, r, meta);
+        const notes = notificationNotes(event, data.project, r.octave, r.scale);
+        schedVoice(name, notes?.[0].hz ?? hz, 0.12 * r.volMult, r, meta, notes);
       }
     } catch { /* audio must never break UI */ }
   };

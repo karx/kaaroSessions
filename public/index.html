@@ -482,6 +482,8 @@
     {"id":"views","label":"History · Live · Sonic","desc":"Graph, Mission Control, DAW consume only the surface."}
   ],
   "kinds": [
+    {"id":"turn_complete","blurb":"Assistant completed a turn.","lane":"stream","pulse":"turn_complete","required":[],"optional":["signal_id","reason"],"emit":[1,1,0,0,0,0,0,0]},
+    {"id":"input_required","blurb":"Assistant requested an answer or approval.","lane":"stream","pulse":"input_required","required":[],"optional":["signal_id","reason"],"emit":[1,1,0,0,0,0,0,0]},
     {"id":"user_turn","blurb":"A human prompt entering the session.","lane":"stream","pulse":"human_turn","required":[],"optional":["text","display_text","cwd","branch"],"emit":[1,1,1,1,1,1,1,1]},
     {"id":"assistant_turn","blurb":"One assistant message envelope. Tokenless harnesses emit a synthetic tokens pulse; tokenful ones emit silent (envelope).","lane":"snapshot","pulse":"silent","required":[],"optional":["model","stop_reason","content_length","text"],"emit":[1,1,1,1,1,1,1,1]},
     {"id":"tool_use","blurb":"One tool invocation. Key (read/write/bash_git/…) is derived later — adapters stay sonic-unaware.","lane":"stream","pulse":"tool_call","required":["tool"],"optional":["category","input","tool_id"],"emit":[1,1,1,1,1,1,1,1]},
@@ -508,6 +510,16 @@
     {"kind":"context_reset","preview":"context window reset"}
   ],
   "samples": {
+    "turn_complete": {"codex": {
+      "raw":"{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"done\"}}",
+      "nr":"{\"kind\":\"turn_complete\",\"harness\":\"codex\",\"signal_id\":\"done\"}",
+      "pulse":"turn_complete { signal_id: done }"
+    }},
+    "input_required": {"claude-code": {
+      "raw":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\",\"id\":\"ask\"}]}}",
+      "nr":"{\"kind\":\"input_required\",\"harness\":\"claude-code\",\"signal_id\":\"ask\"}",
+      "pulse":"input_required { signal_id: ask }"
+    }},
     "user_turn": {
       "claude-code": {
         "raw": "{\"type\":\"user\",\"message\":{\"content\":\"fix the landing copy\"}}",
@@ -624,6 +636,8 @@
 <script type="application/json" id="audio-seed">
 {
   "kindSonic": {
+    "turn_complete": "turn_complete",
+    "input_required": "input_required",
     "user_turn": "human_turn",
     "assistant_turn": "silent",
     "tool_use": "read",
@@ -646,6 +660,8 @@
     "chime": "bell", "sweep": "kick", "tick": "hat"
   },
   "events": [
+    {"key":"turn_complete","family":"context","instrument":"bell","pan":0,"sendAmt":0.12,"brightness":3500,"volMult":0.7,"octave":-1,"desc":"Assistant completed a turn"},
+    {"key":"input_required","family":"context","instrument":"pling","pan":0,"sendAmt":0.1,"brightness":5500,"volMult":0.85,"octave":0,"desc":"Assistant requested input"},
     {"key":"read","family":"file","instrument":"harp","pan":0.05,"sendAmt":0.05,"brightness":6500,"volMult":0.65,"octave":0,"desc":"File read — observing existing state"},
     {"key":"write","family":"file","instrument":"bass","pan":-0.15,"sendAmt":0.05,"brightness":10000,"volMult":1.3,"octave":0,"desc":"File write — creating new state"},
     {"key":"edit","family":"file","instrument":"pling","pan":-0.1,"sendAmt":0.05,"brightness":8500,"volMult":1,"octave":0,"desc":"File edit — mutating existing state"},

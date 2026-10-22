@@ -23,6 +23,8 @@ export const SILENT_REASONS = new Set(['envelope', 'snapshot', 'duplicate']);
  * `tool_result` flips to tool_error when nr.error is set.
  */
 export const KIND_PULSE = {
+  turn_complete: { event: 'turn_complete' },
+  input_required: { event: 'input_required' },
   user_turn:       { event: 'human_turn' },
   assistant_turn:  { event: 'silent', reason: 'envelope' },
   tool_use:        { event: 'tool_call' },

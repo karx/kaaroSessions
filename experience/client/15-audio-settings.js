@@ -33,7 +33,7 @@
     file:    [['read','Read'],['write','Write'],['edit','Edit']],
     system:  [['bash_git','Bash / git'],['bash_run','Bash / run'],['bash_other','Bash / other'],['grep_glob','Grep · Glob']],
     ai:      [['agent','Agent'],['other','Other tools']],
-    context: [['tokens','Tokens'],['words','Words']],
+    context: [['tokens','Tokens'],['words','Words'],['turn_complete','Turn Complete'],['input_required','Input Required']],
   };
 
   // Track which families are expanded

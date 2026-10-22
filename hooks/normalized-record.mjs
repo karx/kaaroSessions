@@ -24,6 +24,8 @@
  * documentation of what each kind means and carries.
  */
 export const KIND_FIELDS = {
+  turn_complete: { required: {}, optional: { signal_id: 'string', reason: 'string' } },
+  input_required: { required: {}, optional: { signal_id: 'string', reason: 'string' } },
   // A human prompt entering the session. text is the cleaned first-user-message
   // (adapters null it for subsequent turns); cwd/branch/version/entrypoint are
   // CC envelope extras.

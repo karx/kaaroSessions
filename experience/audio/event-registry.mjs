@@ -39,6 +39,22 @@ export const FAMILIES = new Set(['file', 'system', 'ai', 'context', 'human', 'me
  * }
  */
 export const EVENT_TYPES = {
+  turn_complete: {
+    family: 'context', instrument: 'bell', pan: 0, sendAmt: 0.12,
+    brightness: 3500, volMult: 0.7, octave: -1,
+    desc: 'Assistant finished its turn',
+    samples: { codex: { version: 1,
+      record: { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'done', last_agent_message: 'Finished.' } },
+      expect: [{ kind: 'turn_complete', harness: 'codex' }] } },
+  },
+  input_required: {
+    family: 'context', instrument: 'pling', pan: 0, sendAmt: 0.1,
+    brightness: 5500, volMult: 0.85, octave: 0,
+    desc: 'Assistant requested an answer or approval; final-question detection is a fallback',
+    samples: { 'claude-code': { version: 1,
+      record: { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'ask', input: {} }] } },
+      expect: [{ kind: 'input_required', harness: 'claude-code' }] } },
+  },
 
   // ── Tool-action sub-keys (carried on tool_call pulses via data.key) ──────
 

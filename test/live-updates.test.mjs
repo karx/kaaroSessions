@@ -21,6 +21,7 @@ test('13-live-updates — cognition loop iterates LIVE_COGNITION_EVENTS', () => 
 
 test('LIVE_COGNITION_EVENTS — matches the live cognition subscribe contract', () => {
   assert.deepEqual(LIVE_COGNITION_EVENTS, [
+    'turn_complete', 'input_required',
     'human_turn', 'compact', 'permission', 'mode_shift',
     'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
     'thinking',

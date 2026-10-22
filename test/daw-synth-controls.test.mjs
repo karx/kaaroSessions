@@ -52,7 +52,7 @@ test('Synth preview buttons retain click handlers after the entire tab is built'
   const { render, previews } = synthHarness();
   const body = render();
   const buttons = body.descendants().filter(el => el.className === 'btn inst-prev');
-  assert.equal(buttons.length, 11);
+  assert.equal(buttons.length, 13);
   assert.equal(typeof buttons[0].onclick, 'function');
   buttons[0].onclick();
   assert.deepEqual(previews, ['harp']);
@@ -126,6 +126,7 @@ test('Instrument previews use the same overall and per-key pitch as live events'
   vm.runInContext(engine.slice(engine.indexOf('  const ROOTS ='), engine.indexOf('  // ── Beat scheduler')), context);
   const pitches = [];
   context.resolveSonic = context.window.resolveSonicForEvent;
+  context.COG_SOUND = {};
   context.INSTS = { harp: (c, at, hz) => pitches.push(hz) };
   context.PERC = new Set();
   context._masterGain = {};

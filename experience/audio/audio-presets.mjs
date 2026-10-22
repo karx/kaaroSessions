@@ -27,7 +27,7 @@ export const AUDIO_PRESETS = {
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -75,6 +75,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'tool_result'}, set: { volMult:0.35, pan: 0.05, send:0.03, brightness: 5000 } },
       // Unknown: minimal tick — diagnostic signal, not music; low vol to stay audible without cluttering
       { match: { key:'unknown'    }, set: { volMult:0.20, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },
@@ -98,7 +100,7 @@ export const AUDIO_PRESETS = {
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -138,6 +140,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'api_error'  }, set: { volMult:1.50, pan: 0.00, send:0.12, brightness:  800, octave:-2 } },
       { match: { key:'tool_result'}, set: { volMult:0.40, pan: 0.05, send:0.03, brightness: 5000 } },
       { match: { key:'unknown'    }, set: { volMult:0.20, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },
@@ -161,7 +165,7 @@ export const AUDIO_PRESETS = {
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -200,6 +204,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'api_error'  }, set: { volMult:1.30, pan: 0.00, send:0.10, brightness:  900, octave:-2 } },
       { match: { key:'tool_result'}, set: { volMult:0.35, pan: 0.05, send:0.03, brightness: 5000 } },
       { match: { key:'unknown'    }, set: { volMult:0.15, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },

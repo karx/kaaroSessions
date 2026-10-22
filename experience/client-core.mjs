@@ -705,12 +705,13 @@ export const DAW_FAMILY_LANES = [
   },
   {
     id: 'context', label: 'CONTEXT', bg: '#080c18', portion: 0.15,
-    toolColors: { tokens: '#00ddcc', words: '#00aaff', thinking: '#ffaa00' },
+    toolColors: { tokens: '#00ddcc', words: '#00aaff', thinking: '#ffaa00', turn_complete: '#66cc88', input_required: '#eebb55' },
     blockW: e => e.type === 'tokens' ? 3 : e.type === 'thinking' ? 6 : 8,
     blockH: e => {
       if (e.type === 'tokens')
         return Math.max(0.1, Math.min(0.8, Math.log1p((e.output || 0) / 200) * 0.35));
       if (e.type === 'thinking') return 0.45;
+      if (e.type === 'turn_complete' || e.type === 'input_required') return 0.75;
       return Math.max(0.1, Math.min(0.85, (e.word_count || 0) / 80));
     },
   },
@@ -782,6 +783,7 @@ export const VOICE_MAX_POLYPHONY = 4;
 export const VOICE_MAX_CHORD = 3;
 
 const VOICE_PRIORITY = {
+  turn_complete: 95, input_required: 99,
   tool_error: 100, api_error: 100,
   write: 90, edit: 80,
   words: 70, human_turn: 70, agent: 65,
@@ -921,6 +923,7 @@ export function sessionLegend(ring, max = 6, windowTokens = 200_000) {
 // Cognition events share one loop. unknown / silent / tool_result stay wire-only.
 
 export const LIVE_COGNITION_EVENTS = [
+  'turn_complete', 'input_required',
   'human_turn', 'compact', 'permission', 'mode_shift',
   'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
   'thinking',
@@ -947,6 +950,10 @@ export function pulseTickerEntry(event, data = {}) {
   const g = PULSE_GLYPHS[event];
   const tag = data.slug ? '  [' + data.slug + ']' : '';
   switch (event) {
+    case 'turn_complete':
+      return { text: 'Turn complete' + tag, role: 'context' };
+    case 'input_required':
+      return { text: 'Input required' + tag, role: 'human' };
     case 'human_turn':
       return { text: g + ' "' + String(data.text || 'prompt').slice(0, 48) + '"' + tag, role: 'human' };
     case 'compact':
