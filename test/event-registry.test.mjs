@@ -62,7 +62,7 @@ test('playableInstrument — maps aspirational names; passes through playable', 
   assert.equal(playableInstrument('click'), 'pling');
   assert.equal(playableInstrument('chime'), 'bell');
   assert.equal(playableInstrument('tick'), 'hat');
-  assert.equal(playableInstrument('woodblock'), 'pling');
+  assert.equal(playableInstrument('woodblock'), 'woodblock');
   assert.equal(playableInstrument('sweep'), 'kick');
   assert.equal(playableInstrument('harp'), 'harp');
   assert.equal(playableInstrument('off'), 'off');

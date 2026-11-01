@@ -7,6 +7,44 @@ const builder = fs.readFileSync(new URL('../experience/client/19-daw-builder.js'
 const synthSource = builder.slice(builder.indexOf('  const SYNTH_KEYS ='), builder.indexOf('  // ── SIM tab'));
 const engine = fs.readFileSync(new URL('../experience/client/14-pulse-audio.js', import.meta.url), 'utf8');
 const settingsSource = engine.slice(0, engine.indexOf('  // ── Rule matching')) + '\n})();';
+const calmInstruments = {
+  read:'hat', write:'bass', edit:'pling', bash_git:'harp', bash_run:'harp', bash_other:'hat',
+  grep_glob:'snare', agent:'bell', other:'kick', web:'bell', tokens:'snare', words:'hat',
+  turn_complete:'bell', input_required:'pling', thinking:'shaker', human_turn:'bell',
+  chirp:'tom', compact:'woodblock', permission:'hat', mode_shift:'hat',
+  attachment:'woodblock', scaffold:'hat', tool_error:'buzz', api_error:'buzz',
+};
+const calmOctaves = Object.fromEntries(Object.keys(calmInstruments).map(key =>
+  [key, ({ read:-2, edit:-1, bash_run:1, agent:-1, human_turn:-1 })[key] ?? 0]));
+
+test('Fresh visits start with the screenshot Calm Groove settings', () => {
+  for (const raw of [null, '{invalid']) {
+    const context = vm.createContext({ window: {}, localStorage: { getItem: key => key === 'kaaro-audio-settings' ? raw : null } });
+    vm.runInContext(settingsSource, context);
+    const settings = JSON.parse(JSON.stringify(context.window.AUDIO_SETTINGS));
+    assert.deepEqual(settings.instruments, calmInstruments);
+    assert.deepEqual(settings.octaves, calmOctaves);
+    assert.equal(settings.scale, 'dorian');
+    assert.equal(settings.noteMode, 'random');
+    assert.equal(settings.octave, 0);
+    assert.equal(settings.clickTrack, false);
+  }
+});
+
+test('Saved choices override Calm Groove defaults and survive reopening', () => {
+  const storage = new Map([['kaaro-audio-settings', JSON.stringify({ instruments: { thinking:'flute' }, octaves: { read:1 }, scale:'blues' })]]);
+  const localStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
+  for (let visit = 0; visit < 2; visit++) {
+    const context = vm.createContext({ window: {}, localStorage });
+    vm.runInContext(settingsSource, context);
+    assert.equal(context.window.AUDIO_SETTINGS.instruments.thinking, 'flute');
+    assert.equal(context.window.AUDIO_SETTINGS.instruments.chirp, 'tom');
+    assert.equal(context.window.AUDIO_SETTINGS.octaves.read, 1);
+    assert.equal(context.window.AUDIO_SETTINGS.octaves.human_turn, -1);
+    assert.equal(context.window.AUDIO_SETTINGS.scale, 'blues');
+    context.window.updateAudioSettings({ bpm:95 });
+  }
+});
 
 // Model DOM reparsing: replacing innerHTML recreates descendants without JS handlers.
 class Element {
@@ -52,7 +90,7 @@ test('Synth preview buttons retain click handlers after the entire tab is built'
   const { render, previews } = synthHarness();
   const body = render();
   const buttons = body.descendants().filter(el => el.className === 'btn inst-prev');
-  assert.equal(buttons.length, 13);
+  assert.equal(buttons.length, 24);
   assert.equal(typeof buttons[0].onclick, 'function');
   buttons[0].onclick();
   assert.deepEqual(previews, ['harp']);
@@ -132,6 +170,7 @@ test('Instrument previews use the same overall and per-key pitch as live events'
   context._masterGain = {};
   context.ac = () => ({ currentTime: 0, createGain: () => ({ gain: {}, connect() {} }) });
   vm.runInContext(engine.slice(engine.indexOf('  window.previewInstrument ='), engine.indexOf('  // ── Beat ring buffer')), context);
+  context.window.updateAudioSettings({ noteMode: 'root_only', octaves: { read: 0 } });
   context.window.previewInstrument('harp', 'read');
   context.window.updateAudioSettings({ octave: -1, octaves: { read: -1 } });
   context.window.previewInstrument('harp', 'read');
@@ -191,6 +230,8 @@ test('Calm Groove preset restores the screenshot instruments and octaves', () =>
   context.window.updateAudioProfile = profile => { context.window.profile = profile; };
   vm.runInContext("applyPreset(DAW_PRESETS.find(p => p.name === 'Calm Groove'))", context);
   const settings = context.window.settings;
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.instruments)), calmInstruments);
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.octaves)), calmOctaves);
   assert.equal(settings.scale, 'dorian');
   assert.equal(settings.noteMode, 'random');
   assert.equal(settings.octave, 0);
@@ -205,4 +246,29 @@ test('Calm Groove preset restores the screenshot instruments and octaves', () =>
   assert.equal(settings.octaves.bash_run, 1);
   assert.equal(settings.instruments.words, 'hat');
   assert.equal(settings.instruments.grep_glob, 'snare');
+});
+
+test('Every Graph sound has a Synth row, including thinking, errors, and short replies', () => {
+  const { render } = synthHarness();
+  const labels = render().descendants().filter(el => el.className === 'inst-key').map(el => el.textContent);
+  for (const label of ['Web', 'Thinking', 'User Prompt', 'Short Reply', 'Compaction',
+    'Permission Mode', 'Mode Change', 'Attachment', 'System Message', 'Tool Error', 'API Error']) {
+    assert.ok(labels.includes(label), 'Missing Synth row: ' + label);
+  }
+});
+
+test('Thinking instrument and octave can be changed and restored when the tab is rebuilt', () => {
+  const { render, window } = synthHarness();
+  window.AUDIO_SETTINGS.instruments.thinking = 'bell';
+  const body = render();
+  const row = body.descendants().find(el => el.children.some(child => child.textContent === 'Thinking'));
+  assert.ok(row);
+  const select = row.children.find(el => el.tagName === 'select');
+  assert.equal(select.value, 'bell');
+  select.value = 'off'; select.onchange();
+  const octave = row.children.find(el => el.title === 'Thinking octave');
+  octave.value = '-2'; octave.onchange();
+  const restored = render().descendants().find(el => el.children.some(child => child.textContent === 'Thinking'));
+  assert.equal(restored.children.find(el => el.tagName === 'select').value, 'off');
+  assert.equal(restored.children.find(el => el.title === 'Thinking octave').value, '-2');
 });

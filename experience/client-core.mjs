@@ -792,7 +792,7 @@ const VOICE_PRIORITY = {
   tokens: 12, thinking: 10, unknown: 8, permission: 8,
 };
 
-const PERC_VOICES = new Set(['snare', 'kick', 'hat']);
+const PERC_VOICES = new Set(['snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock']);
 
 export function voicePriority(v) {
   const key = v?.sonic?.key || v?.key || '';

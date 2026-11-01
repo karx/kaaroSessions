@@ -490,7 +490,7 @@
     'attachment', 'scaffold', 'thinking', 'tool_error', 'api_error',
   ];
   const MATCH_HARNESSES = ['claude-code', 'pi', 'antigravity', 'grok', 'opencode', 'copilot'];
-  const INST_NAMES = ['harp', 'bass', 'bell', 'flute', 'bit', 'pling', 'snare', 'kick', 'hat', 'buzz', 'off'];
+  const INST_NAMES = ['harp', 'bass', 'bell', 'flute', 'bit', 'pling', 'marimba', 'snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock', 'buzz', 'off'];
   const DEGREE_MODES = ['path_hash', 'sequential', 'random', 'root'];
 
   function buildMapTab(body) {
@@ -716,8 +716,13 @@
     ['read','Read'], ['write','Write'], ['edit','Edit'],
     ['bash_git','Bash (git)'], ['bash_run','Bash (run)'], ['bash_other','Bash (other)'],
     ['grep_glob','Grep/Glob'], ['agent','Agent'], ['other','Other'],
+    ['web','Web'],
     ['tokens','Tokens'], ['words','Words'],
     ['turn_complete','Turn Complete'], ['input_required','Input Required'],
+    ['thinking','Thinking'], ['human_turn','User Prompt'], ['chirp','Short Reply'],
+    ['compact','Compaction'], ['permission','Permission Mode'], ['mode_shift','Mode Change'],
+    ['attachment','Attachment'], ['scaffold','System Message'],
+    ['tool_error','Tool Error'], ['api_error','API Error'],
   ];
 
   function buildSynthTab(body) {
@@ -762,7 +767,7 @@
       const row = document.createElement('div'); row.className = 'inst-row';
       const lbl = document.createElement('div'); lbl.className = 'inst-key'; lbl.textContent = label;
       const sel = document.createElement('select'); sel.className = 'inp inst-sel';
-      sel.innerHTML = ['harp','bass','bell','flute','bit','pling','snare','kick','hat','off']
+      sel.innerHTML = ['harp','bass','bell','flute','bit','pling','marimba','snare','kick','hat','rimshot','clap','shaker','tom','woodblock','buzz','off']
         .map(n => `<option value="${n}"${S2.instruments?.[key]===n?' selected':''}>${n}</option>`).join('');
       sel.onchange = () => {
         const patch = { instruments: {} }; patch.instruments[key] = sel.value;
@@ -826,8 +831,7 @@
       <div class="sec-head">Event Simulator</div>
       <div class="row"><label>type</label>
         <select id="sim-type" class="inp">
-          <option>tool_call</option><option>tokens</option><option>words</option>
-          <option>turn_complete</option><option>input_required</option>
+          ${LIVE_PLAYPULSE_EVENTS.map(event => `<option>${event}</option>`).join('')}
         </select>
       </div>
       <div class="row"><label>harness</label>
@@ -901,20 +905,27 @@
   const DAW_PRESETS = [
     {
       name: 'Calm Groove',
-      tag: 'Dorian · Warm harp · Gentle rhythm',
-      desc: 'Warm harp, bass and low bells with soft snares and hats. Random Dorian notes.',
+      tag: 'Dorian · Warm harp · Gentle percussion',
+      desc: 'Warm harp, bass and low bells with shaker, tom and woodblock accents. Random Dorian notes.',
       settings: {
         scale: 'dorian', noteMode: 'random', octave: 0, clickTrack: false,
         instruments: {
           read:'hat', write:'bass', edit:'pling',
           bash_git:'harp', bash_run:'harp', bash_other:'hat',
           grep_glob:'snare', agent:'bell', other:'kick',
-          tokens:'snare', words:'hat',
+          web:'bell', tokens:'snare', words:'hat',
+          turn_complete:'bell', input_required:'pling', thinking:'shaker',
+          human_turn:'bell', chirp:'tom', compact:'woodblock',
+          permission:'hat', mode_shift:'hat', attachment:'woodblock',
+          scaffold:'hat', tool_error:'buzz', api_error:'buzz',
         },
         octaves: {
           read:-2, write:0, edit:-1,
           bash_git:0, bash_run:1, bash_other:0,
-          grep_glob:0, agent:-1, other:0, tokens:0, words:0,
+          grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
+          turn_complete:0, input_required:0, thinking:0, human_turn:-1,
+          chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
+          scaffold:0, tool_error:0, api_error:0,
         },
       },
       mappings: [
@@ -1250,14 +1261,11 @@
     }
     try {
       const es = new EventSource('/events');
-      for (const event of ['turn_complete', 'input_required']) {
+      for (const event of LIVE_PLAYPULSE_EVENTS) {
         es.addEventListener(event, e => {
           try { window.playPulse?.(event, JSON.parse(e.data)); } catch {}
         });
       }
-      es.addEventListener('tool_call', e => { try { if (window.playPulse) window.playPulse('tool_call', JSON.parse(e.data)); } catch {} });
-      es.addEventListener('tokens',    e => { try { if (window.playPulse) window.playPulse('tokens',    JSON.parse(e.data)); } catch {} });
-      es.addEventListener('words',     e => { try { if (window.playPulse) window.playPulse('words',     JSON.parse(e.data)); } catch {} });
       es.onopen  = () => { if (statusEl) statusEl.textContent = 'LIVE /events'; };
       es.onerror = () => { if (statusEl) statusEl.textContent = 'reconnecting…'; };
     } catch { if (statusEl) statusEl.textContent = 'SSE failed — use SIM'; }

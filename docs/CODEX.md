@@ -52,6 +52,24 @@ latest entry per task id and uses `thread_name` as `session.ai_title`.
 
 ### Turn Notifications
 
+Graph and DAW use the same live sound event list. The DAW Synth tab exposes
+all audible categories, including Thinking, User Prompt, Short Reply, Web,
+Compaction, Permission Mode, Mode Change, Attachment, System Message,
+Tool Error, and API Error. Each row has instrument, octave, and preview controls;
+choose **off** to mute that category. Changes are saved for both views in the
+same browser. Human/context signals appear in the Context lane; structural
+signals and errors appear in System. SIM offers the same event types for testing.
+
+Both views offer rimshot, clap, shaker, tom, and woodblock alongside kick,
+snare, and hi-hat. Marimba adds a softer pitched mallet voice that follows the
+selected scale and octave. These choices are also available in DAW mapping
+rules; adding them does not change existing presets or saved selections.
+
+Calm Groove is the default for fresh visits: random Dorian notes, low bells,
+harp and bass, with shaker for Thinking, tom for Short Reply, and woodblock for
+Compaction and Attachment. Saved choices still take precedence when reopening
+the site. Apply Calm Groove in the DAW's PROF tab to restore the entire preset.
+
 The Synth tab includes **Turn Complete** (low bell) and **Input Required**
 (pling), each with an instrument, octave offset, and preview. Both events
 also appear in the DAW simulator and the graph's live ticker.

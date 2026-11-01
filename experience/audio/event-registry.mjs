@@ -376,12 +376,13 @@ export const EVENT_TYPE_KEYS = new Set(Object.keys(EVENT_TYPES));
 export const PLAYABLE_INSTRUMENTS = new Set([
   'harp', 'bass', 'bell', 'flute', 'bit', 'pling',
   'snare', 'kick', 'hat', 'buzz', 'off',
+  'rimshot', 'clap', 'shaker', 'tom', 'woodblock', 'marimba',
 ]);
 
 /** Aspirational registry names → playable stand-ins until those synths exist. */
 export const PLAYABLE_FALLBACK = {
   pad: 'bell', click: 'pling', chime: 'bell',
-  tick: 'hat', woodblock: 'pling', sweep: 'kick',
+  tick: 'hat', sweep: 'kick',
 };
 
 export function playableInstrument(name) {

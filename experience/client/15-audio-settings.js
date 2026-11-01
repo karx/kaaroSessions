@@ -8,6 +8,8 @@
   const INST_OPTS = [
     ['harp','Harp'],['bass','Bass'],['bell','Bell'],['flute','Flute'],
     ['bit','Bit'],['pling','Pling'],['snare','Snare'],['kick','Kick'],['hat','Hi-Hat'],
+    ['rimshot','Rimshot'],['clap','Clap'],['shaker','Shaker'],['tom','Tom'],
+    ['woodblock','Woodblock'],['marimba','Marimba'],['buzz','Buzz'],
     ['off','— Off —'],
   ];
 

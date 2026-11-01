@@ -21,9 +21,9 @@
   // ── Families ──────────────────────────────────────────────────────────────────
   window.AUDIO_FAMILIES = [
     { id: 'file',    label: 'File Ops', color: '#2a6a2a', tools: ['read', 'write', 'edit', 'grep_glob'] },
-    { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other'] },
+    { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other', 'compact', 'permission', 'scaffold', 'tool_error', 'api_error'] },
     { id: 'ai',      label: 'AI',       color: '#6a2a7a', tools: ['agent', 'other', 'web'] },
-    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required'] },
+    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required', 'human_turn', 'chirp', 'mode_shift', 'attachment'] },
   ];
 
   const TOOL_FAMILY = {};
@@ -35,20 +35,26 @@
   const DEFAULT_SETTINGS = {
     instruments: {
       turn_complete: 'bell', input_required: 'pling',
-      read: 'harp', write: 'bass', edit: 'pling',
-      bash_git: 'snare', bash_run: 'hat', bash_other: 'kick',
-      grep_glob: 'bit', agent: 'bell', other: 'harp',
-      web: 'bell', tokens: 'flute', words: 'bell',
+      read: 'hat', write: 'bass', edit: 'pling',
+      bash_git: 'harp', bash_run: 'harp', bash_other: 'hat',
+      grep_glob: 'snare', agent: 'bell', other: 'kick',
+      web: 'bell', tokens: 'snare', words: 'hat',
       tool_error: 'buzz', api_error: 'buzz',
-      human_turn: 'bell', compact: 'kick',
+      human_turn: 'bell', compact: 'woodblock',
       permission: 'hat', mode_shift: 'hat',
-      chirp: 'pling', attachment: 'pling', scaffold: 'hat',
-      thinking: 'bell',
+      chirp: 'tom', attachment: 'woodblock', scaffold: 'hat',
+      thinking: 'shaker',
     },
-    scale:       'major_pentatonic',
+    scale:       'dorian',
     octave:      0,
-    octaves:     {},
-    noteMode:    'path_hash',
+    octaves: {
+      read:-2, write:0, edit:-1, bash_git:0, bash_run:1, bash_other:0,
+      grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
+      turn_complete:0, input_required:0, thinking:0, human_turn:-1,
+      chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
+      scaffold:0, tool_error:0, api_error:0,
+    },
+    noteMode:    'random',
     bpm:         120,
     beatsPerBar: 4,
     clickTrack:  false,
@@ -65,7 +71,7 @@
       return {
         ...DEFAULT_SETTINGS, ...s,
         instruments: { ...DEFAULT_SETTINGS.instruments, ...(s.instruments || {}) },
-        octaves:     { ...(s.octaves || {}) },
+        octaves:     { ...DEFAULT_SETTINGS.octaves, ...(s.octaves || {}) },
         filter:      { ...DEFAULT_SETTINGS.filter,      ...(s.filter || {}) },
       };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); }
@@ -265,8 +271,8 @@
     octave += Number(S.octaves?.[key]) || 0;
     const tmb = (P.timbre && P.timbre[instrument]) || {};
     const fam = key ? (TOOL_FAMILY[key] || null) : null;
-    if (instrument && instrument !== 'off' && !['harp','bass','bell','flute','bit','pling','snare','kick','hat','buzz'].includes(instrument)) {
-      instrument = ({ pad:'bell', click:'pling', chime:'bell', tick:'hat', woodblock:'pling', sweep:'kick' })[instrument] || 'harp';
+    if (instrument && instrument !== 'off' && !['harp','bass','bell','flute','bit','pling','snare','kick','hat','buzz','rimshot','clap','shaker','tom','woodblock','marimba'].includes(instrument)) {
+      instrument = ({ pad:'bell', click:'pling', chime:'bell', tick:'hat', sweep:'kick' })[instrument] || 'harp';
     }
     return { key, instrument, volMult, octave, degreeMode, scale, timbre: tmb, fam, pan, sendAmt, brightness };
   }
@@ -619,12 +625,71 @@
     o.connect(g); g.connect(out); o.start(at); o.stop(at + 0.27);
   }
 
-  const INSTS = { harp, bass, bell, flute, bit, pling, snare, kick, hat, buzz };
+  function struckModes(c, at, vol, out, modes) {
+    for (const [hz, weight, duration] of modes) {
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = hz;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(vol * weight, at + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.001, at + duration);
+      o.connect(g); g.connect(out); o.start(at); o.stop(at + duration);
+    }
+  }
+
+  function rimshot(c, at, vol, out) {
+    struckModes(c, at, vol ?? 0.24, out, [[1200, 0.65, 0.045], [1900, 0.35, 0.025]]);
+  }
+
+  function woodblock(c, at, vol, out) {
+    struckModes(c, at, vol ?? 0.28, out, [[750, 0.75, 0.12], [1150, 0.25, 0.06]]);
+  }
+
+  function marimba(c, at, hz, vol, out) {
+    struckModes(c, at, vol ?? 0.32, out, [[hz, 0.85, 0.8], [hz * 2.76, 0.15, 0.18]]);
+  }
+
+  function tom(c, at, vol, out) {
+    const o = c.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(170, at);
+    o.frequency.exponentialRampToValueAtTime(90, at + 0.14);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol ?? 0.4, at + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.001, at + 0.34);
+    o.connect(g); g.connect(out); o.start(at); o.stop(at + 0.34);
+  }
+
+  function filteredNoise(c, at, vol, out, frequency, duration, attack) {
+    const buf = c.createBuffer(1, Math.floor(c.sampleRate * duration), c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource(); src.buffer = buf;
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = frequency; f.Q.value = 0.8;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol, at + attack);
+    g.gain.exponentialRampToValueAtTime(0.001, at + duration);
+    src.connect(f); f.connect(g); g.connect(out); src.start(at); src.stop(at + duration);
+  }
+
+  function clap(c, at, vol, out) {
+    // Closely spaced noise bursts produce a handclap without a pitched layer.
+    for (let i = 0; i < 3; i++) {
+      filteredNoise(c, at + i * 0.012, (vol ?? 0.3) * (i === 2 ? 1 : 0.65), out, 1400, i === 2 ? 0.14 : 0.012, 0.002);
+    }
+  }
+
+  function shaker(c, at, vol, out) {
+    filteredNoise(c, at, vol ?? 0.2, out, 4200, 0.085, 0.015);
+  }
+
+  const INSTS = { harp, bass, bell, flute, bit, pling, snare, kick, hat, buzz, rimshot, clap, shaker, tom, woodblock, marimba };
   window.INSTS = INSTS;
-  const PERC  = new Set(['snare', 'kick', 'hat']);
+  const PERC  = new Set(['snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock']);
   const INST_DUR = {
     harp: 0.9, bass: 1.4, bell: 2.5, flute: 0.65, bit: 0.22, pling: 0.48,
     snare: 0.12, kick: 0.25, hat: 0.04, buzz: 0.27,
+    rimshot: 0.045, clap: 0.164, shaker: 0.085, tom: 0.34, woodblock: 0.12, marimba: 0.8,
   };
 
   window.previewInstrument = function (name, key) {
