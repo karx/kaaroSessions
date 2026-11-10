@@ -4,11 +4,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RECORD_KINDS } from '../hooks/normalized-record.mjs';
+import { RECORD_KINDS, USER_ORIGINS } from '../hooks/normalized-record.mjs';
 import { EVENT_TYPE_KEYS } from '../experience/audio/event-registry.mjs';
 import {
   KIND_PULSE, SILENT_REASONS, pulseDisposition, kindPulseKeys, streamEvents,
-  KIND_ROUTES, routeIdFromNr,
+  KIND_ROUTES, routeIdFromNr, routeIdFromPulse,
 } from '../hooks/pulse-map.mjs';
 
 test('KIND_PULSE keys are exactly RECORD_KINDS', () => {
@@ -122,5 +122,24 @@ test('KIND_ROUTES — content_block and tool_result cover pulseDisposition branc
     if (nr.kind === 'content_block') assert.ok(cbIds.has(rid), `missing content_block route ${rid}`);
     if (nr.kind === 'tool_result') assert.ok(trIds.has(rid), `missing tool_result route ${rid}`);
   }
-  assert.equal(routeIdFromNr({ kind: 'user_turn' }), null);
+  assert.equal(routeIdFromNr({ kind: 'session_meta' }), null, 'kinds without KIND_ROUTES have no route');
+});
+
+// ── user_turn routes by origin (Phase 1.5) ───────────────────────────────────
+
+test('KIND_ROUTES.user_turn — one route per USER_ORIGINS member; only human is expected everywhere', () => {
+  const ids = KIND_ROUTES.user_turn.map(r => r.id);
+  assert.deepEqual([...ids].sort(), [...USER_ORIGINS].sort());
+  for (const r of KIND_ROUTES.user_turn) {
+    assert.equal(r.pulse, 'human_turn');
+    assert.equal(r.expect, r.id === 'human' ? 'all' : 'none', r.id);
+  }
+});
+
+test('routeIdFromNr / routeIdFromPulse — user_turn routes by origin (absent → derived)', () => {
+  assert.equal(routeIdFromNr({ kind: 'user_turn', origin: 'sidechain' }), 'sidechain');
+  assert.equal(routeIdFromNr({ kind: 'user_turn', display_text: 'go' }), 'human');
+  assert.equal(routeIdFromNr({ kind: 'user_turn', display_text: null }), 'tool_result');
+  assert.equal(routeIdFromPulse('human_turn', { nr_kind: 'user_turn', origin: 'interrupt' }), 'interrupt');
+  assert.equal(routeIdFromPulse('human_turn', { nr_kind: 'user_turn' }), 'human');
 });

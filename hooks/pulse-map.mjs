@@ -13,7 +13,12 @@
  * you do. Do not put the new kind on the unknown allowlist.
  */
 
-import { RECORD_KINDS } from './normalized-record.mjs';
+import { RECORD_KINDS, USER_ORIGINS } from './normalized-record.mjs';
+
+/** user_turn origin; absent → derived the same way pulse-transformer does. */
+function userOrigin(nr) {
+  return nr.origin ?? (nr.display_text === null ? 'tool_result' : 'human');
+}
 
 export const SILENT_REASONS = new Set(['envelope', 'snapshot', 'duplicate']);
 
@@ -115,6 +120,11 @@ export const KIND_ROUTES = {
     { id: 'ok',    pulse: 'tool_result', role: 'emit' },
     { id: 'error', pulse: 'tool_error',  role: 'emit' },
   ],
+  // Who produced the row. Only `human` is expected of every harness; the rest
+  // are harness-specific injections (n/a where a harness never emits them).
+  user_turn: [...USER_ORIGINS].map(id => ({
+    id, pulse: 'human_turn', role: 'emit', expect: id === 'human' ? 'all' : 'none',
+  })),
 };
 
 /** Route id for one NR, or null if the kind has no KIND_ROUTES row. */
@@ -129,6 +139,7 @@ export function routeIdFromNr(nr, capabilities = {}) {
     return 'unknown-block';
   }
   if (nr.kind === 'tool_result') return nr.error ? 'error' : 'ok';
+  if (nr.kind === 'user_turn') return userOrigin(nr);
   return null;
 }
 
@@ -149,6 +160,7 @@ export function routeIdFromPulse(event, data = {}) {
     if (event === 'tool_error') return 'error';
     if (event === 'tool_result') return 'ok';
   }
+  if (data.nr_kind === 'user_turn') return data.origin ?? 'human';
   return null;
 }
 
