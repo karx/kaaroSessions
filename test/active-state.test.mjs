@@ -379,3 +379,43 @@ test('health — snapshot carries state + inputs from the recent-actions ring', 
   assert.equal(s.health.state, 'ok');
   assert.ok(s.health.inputs.some(i => i.id === 'tool_error_rate'));
 });
+
+// ── awaiting (turn_complete / input_required → ball is in the human's court) ──
+
+test('awaiting — null by default', () => {
+  const st = createActiveState();
+  applyPulse(st, tc('read'), T0);
+  assert.equal(snapshotActive(st, T0).sessions[0].awaiting, null);
+});
+
+test('awaiting — input_required sets it; the asking tool call + tokens in the same batch do not clear it', () => {
+  const st = createActiveState();
+  applyPulse(st, pulse('input_required', { reason: 'question_tool' }), T0);
+  applyPulse(st, pulse('tool_call', { tool: 'AskUserQuestion', key: 'other' }), T0);
+  applyPulse(st, pulse('tokens', { output: 10 }), T0);
+  const s = snapshotActive(st, T0 + 30_000).sessions[0];
+  assert.deepEqual(s.awaiting, { event: 'input_required', reason: 'question_tool', seconds: 30 });
+});
+
+test('awaiting — turn_complete sets it with its reason', () => {
+  const st = createActiveState();
+  applyPulse(st, pulse('turn_complete', { reason: 'end_turn' }), T0);
+  assert.deepEqual(snapshotActive(st, T0).sessions[0].awaiting,
+    { event: 'turn_complete', reason: 'end_turn', seconds: 0 });
+});
+
+test('awaiting — cleared by a human prompt, a tool result (the answer), or new agent work', () => {
+  for (const clearer of [prompt(), pulse('tool_result', {}), tc('read'), pulse('words', { preview: 'ok' })]) {
+    const st = createActiveState();
+    applyPulse(st, pulse('input_required', { reason: 'approval' }), T0);
+    applyPulse(st, clearer, T0 + 1000);
+    assert.equal(snapshotActive(st, T0 + 1000).sessions[0].awaiting, null, clearer.event);
+  }
+});
+
+test('awaiting — signals land in recent_actions', () => {
+  const st = createActiveState();
+  applyPulse(st, pulse('input_required', { reason: 'final_question' }), T0);
+  const a = snapshotActive(st, T0).sessions[0].recent_actions.at(-1);
+  assert.deepEqual(a, { type: 'input_required', ts: T0, reason: 'final_question' });
+});

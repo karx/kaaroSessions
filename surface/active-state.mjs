@@ -18,6 +18,11 @@
 import { assessRipeness, assessHealth } from './session-vitals.mjs';
 
 const AGENT_EVENTS = new Set(['tool_call', 'tool_error', 'tool_result', 'tokens', 'words', 'chirp', 'thinking']);
+// Pulses that end an awaiting state: the human answered/prompted, or the agent
+// resumed. tokens are excluded (usage rides the same batch as the signal), and
+// so is the asking tool's own tool_call (AskUserQuestion → input_required → tool_call).
+const RESUME_EVENTS = new Set(['human_turn', 'tool_result', 'tool_error', 'words', 'chirp', 'thinking', 'compact', 'tool_call']);
+const ASKING_TOOL = /^(AskUserQuestion|ExitPlanMode)$|(^|[._])request_user_input(_async)?$/;
 const PLAN_REF = /(^|\/)(RFC-[^/]*|[^/]*PLAN[^/]*|EXECUTION\.md)$|\/plans?\//i;
 
 function newRound() { return { tools: 0, do: 0, verify: 0, activity: 0 }; }
@@ -77,6 +82,7 @@ function getEntry(state, data, now) {
       last_tool_at: null,
       has_cache: false,
       last_context: null,
+      awaiting: null,           // { event, reason, since } — ball is in the human's court
     };
     state.sessions.set(data.session_id, e);
   }
@@ -108,7 +114,18 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
   if (!e.project && data.project) e.project = data.project; // backfill (opencode part pulses lack it)
   if (AGENT_EVENTS.has(event)) { e.last_agent_at = now; e.round.activity++; }
 
+  if (e.awaiting && RESUME_EVENTS.has(event)
+      && !(event === 'tool_call' && ASKING_TOOL.test(String(data.tool ?? '')))) {
+    e.awaiting = null;
+  }
+
   switch (event) {
+    case 'turn_complete':
+    case 'input_required':
+      e.awaiting = { event, reason: data.reason ?? null, since: now };
+      pushAction(e, { type: event, ts: now, reason: data.reason ?? null });
+      break;
+
     case 'tool_call':
       e.tool_calls++;
       e.last_tool = {
@@ -271,6 +288,8 @@ export function snapshotActive(state, now, overrides = {}) {
       phase: e.phase,
       time_in_phase_s: e.phase_since == null ? null : Math.round((now - e.phase_since) / 1000),
       lead_in: { turns: leadInTurns(e), tool_calls: e.lead_in_tool_calls },
+      awaiting: e.awaiting && { event: e.awaiting.event, reason: e.awaiting.reason,
+        seconds: Math.round((now - e.awaiting.since) / 1000) },
       ripeness: assessRipeness({
         phase: e.phase,
         lead_in_turns: leadInTurns(e),
