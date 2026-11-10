@@ -6,6 +6,7 @@
 
 import { extractTextFromContent, extractSkills, categorizeBash } from '../helpers/analyze-helpers.mjs';
 import { finalTurnSignal, inputToolSignal } from '../helpers/turn-signals.mjs';
+import { classifyClaudeUserOrigin } from '../helpers/user-origin.mjs';
 
 const HARNESS = 'claude-code';
 
@@ -105,12 +106,11 @@ export function recordsToNormalized(records) {
     if (rec.type === 'user' && rec.message) {
       handled = true;
       const text = extractTextFromContent(rec.message.content);
+      const origin = classifyClaudeUserOrigin(rec);
       let userText = null;
-      if (!firstUserSeen) {
+      if (!firstUserSeen && (origin === 'human' || origin === 'command')) {
         const stripped = stripFirstUserMessage(text);
-        if (stripped.length >= 8
-            && !stripped.startsWith('Base directory for this skill')
-            && !stripped.startsWith('Caveat:')) {
+        if (stripped.length >= 8) {
           userText = stripped;
           firstUserSeen = true;
         }
@@ -124,7 +124,7 @@ export function recordsToNormalized(records) {
 
       out.push({
         kind: 'user_turn', harness: HARNESS, ts, text: userText,
-        display_text: displayText,
+        display_text: displayText, origin,
         version: rec.version, entrypoint: rec.entrypoint,
         cwd: rec.cwd, branch: rec.gitBranch,
       });
