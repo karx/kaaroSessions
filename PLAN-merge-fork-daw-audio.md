@@ -44,21 +44,34 @@ same tag.
 
 ---
 
-## Phase 0 — Merge hygiene ⬜
+## Phase 0 — Merge hygiene ✅ (`0ab77fb`)
 
 **Rationale.** The branch's code, tests and `CLAUDE.md` cite `RFC-session-triggers.md`, which
 is untracked. Merging now would leave `master` with dangling references.
 
-- [ ] Commit `RFC-session-triggers.md` (and `notes/session-triggers-rfc-brief.md` if wanted)
-- [ ] Add an Item 11 pointer to this plan in `EXECUTION.md`
-- [ ] Leave out `tools.html` and `demos/` (scratch)
+- [x] Commit `RFC-session-triggers.md` (brief left untracked)
+- [x] Add an Item 11 pointer to this plan in `EXECUTION.md`
+- [x] Leave out `tools.html` and `demos/` (scratch)
 
 **End hypothesis.** `grep -r RFC-session-triggers` → every reference resolves to a tracked
 file. The suite stays at 1939.
 
 ---
 
-## Phase 1 — `origin` on user rows: normalize once, consume everywhere ⬜ (merge gate)
+## Phase 1 — `origin` on user rows: normalize once, consume everywhere ✅ (merge gate)
+
+**Landed:** 1.1 `fbf50a6` · 1.2 `3fe2da5` + fix `575b17f` (reminder-prefixed prompts) + wiring `152d509` ·
+1.3 `9057b65` · 1.4 `ef875cf` + feed `31b849d` · 1.5 `5361390`. Suite 1939 → 1978.
+
+**Hypothesis results (real data):**
+- Classifier over 7,226 user rows (all local projects): no injected rows left as `human`.
+  Real data found 3 cases the fixtures missed (isMeta skill body with `<command-name>`,
+  `<bash-input>`/`<bash-stdout>`, reminder-prefixed typed prompt); each got a red test first.
+- First-message diff over 94 sessions: 1 changed, a skill body replaced by the typed prompt.
+- Store replay incl. subagent files: human_turns **162→8** (f22d728b), **94→13** (eb64c814),
+  **96→5** (5ca8614f), each equal to the number of typed rows. ✔
+- Other harnesses: goldens untouched, nr-compliance green. ✔
+- Deferred: `public/index.html` seed blurb → Phase 5.2.
 
 **Rationale.** This is the root cause behind findings #1 and #2, the false human bells, the
 missing interrupt signal and the double compaction sound. The raw data is already well
@@ -255,3 +268,4 @@ Node 18/20/22, and every live checklist item behaves as stated.
 ## Status log
 
 - 2026-11-10 — plan written; branch at `78e3922`, 1939 green.
+- 2026-11-10 — Phases 0 + 1 landed (9 commits); 1978 green. Next: Phase 2.

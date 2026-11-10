@@ -194,7 +194,7 @@ Grounding (verified 2026-07-20):
 test it); snapshot log payload size (30+ sessions ≈ MBs — acceptable per RFC "full
 shape preferred"; gzip noted as future work).
 
-## Item 11 — Merge readiness: fork DAW audio + session vitals ⬜ PENDING
+## Item 11 — Merge readiness: fork DAW audio + session vitals 🟡 IN PROGRESS (Phases 0–1 ✅)
 
 Phase-wise plan with rationale, direction and end hypotheses:
 [`PLAN-merge-fork-daw-audio.md`](PLAN-merge-fork-daw-audio.md). Branch
