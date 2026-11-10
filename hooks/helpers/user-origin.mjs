@@ -14,7 +14,8 @@ import { extractTextFromContent } from './analyze-helpers.mjs';
 
 const INTERRUPT = /^\[Request interrupted by user/;
 const NOTIFICATION = /^<task-notification>/;
-const META_TEXT = /^(<local-command-stdout>|<local-command-stderr>|<local-command-caveat>|<bash-stdout>|<bash-stderr>|<system-reminder>|Caveat:|Base directory for this skill)/;
+const REMINDER_BLOCK = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+const META_TEXT = /^(<local-command-stdout>|<local-command-stderr>|<local-command-caveat>|<bash-stdout>|<bash-stderr>|Caveat:|Base directory for this skill)/;
 // Typed by the human: slash commands and `!` shell input.
 const COMMAND = /<command-name>|^<bash-input>/;
 
@@ -27,9 +28,14 @@ export function classifyClaudeUserOrigin(rec) {
   if (rec?.isCompactSummary) return 'compact_summary';
 
   const content = rec?.message?.content;
-  const text = extractTextFromContent(content ?? '').trim();
-  if (!text && Array.isArray(content) && content.length
+  const raw = extractTextFromContent(content ?? '').trim();
+  if (!raw && Array.isArray(content) && content.length
       && content.every(b => b?.type === 'tool_result')) return 'tool_result';
+
+  // Reminders can be prepended to a typed prompt: classify what remains.
+  // A row that is nothing but reminders is meta.
+  const text = raw.replace(REMINDER_BLOCK, '').trim();
+  if (raw && !text) return 'meta';
 
   if (INTERRUPT.test(text)) return 'interrupt';
   if (NOTIFICATION.test(text)) return 'notification';
