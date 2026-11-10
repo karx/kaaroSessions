@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   RECORD_KINDS, KIND_FIELDS, isNormalizedRecord, validateNormalizedRecord,
+  USER_ORIGINS,
 } from '../hooks/normalized-record.mjs';
 
 test('RECORD_KINDS — contains expected kinds', () => {
@@ -129,4 +130,17 @@ test('validateNormalizedRecord — ts must be string, number, or null', () => {
   assert.equal(validateNormalizedRecord({ kind: 'context_reset', harness: 'x' }).ok, true,
     'ts may be absent');
   assert.equal(validateNormalizedRecord({ kind: 'context_reset', harness: 'x', ts: {} }).ok, false);
+});
+
+test('user_turn.origin — closed enum: who/what produced the user row', () => {
+  assert.deepEqual([...USER_ORIGINS].sort(), [
+    'command', 'compact_summary', 'human', 'interrupt', 'meta', 'notification', 'sidechain', 'tool_result',
+  ]);
+  for (const origin of USER_ORIGINS) {
+    assert.equal(validateNormalizedRecord({ kind: 'user_turn', harness: 'x', ts: null, origin }).ok, true, origin);
+  }
+  assert.equal(validateNormalizedRecord({ kind: 'user_turn', harness: 'x', ts: null }).ok, true, 'origin optional');
+  const bad = validateNormalizedRecord({ kind: 'user_turn', harness: 'x', ts: null, origin: 'robot' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join(), /origin/);
 });

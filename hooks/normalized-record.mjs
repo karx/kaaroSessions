@@ -31,7 +31,8 @@ export const KIND_FIELDS = {
   // CC envelope extras.
   // display_text carries per-turn human text for trace/thread views; text is
   // the cleaned FIRST user message only (session bundle semantics).
-  user_turn:       { required: {}, optional: { text: 'string', display_text: 'string', version: 'string', entrypoint: 'string', cwd: 'string', branch: 'string' } },
+  // origin: who/what produced the row (USER_ORIGINS). Absent → 'human'.
+  user_turn:       { required: {}, optional: { text: 'string', display_text: 'string', version: 'string', entrypoint: 'string', cwd: 'string', branch: 'string', origin: 'string' } },
 
   // One assistant message envelope. content_length is the synthetic-token
   // proxy for harnesses with capabilities.tokens === false.
@@ -114,6 +115,15 @@ function checkType(field, type, val, errors) {
  * @param {unknown} rec
  * @returns {{ ok: boolean, errors: string[] }}
  */
+/**
+ * user_turn.origin — closed set. Only `human` and `command` are the person
+ * typing; the rest are harness-injected rows that travel as `user` messages.
+ */
+export const USER_ORIGINS = new Set([
+  'human', 'command', 'tool_result', 'interrupt',
+  'meta', 'notification', 'compact_summary', 'sidechain',
+]);
+
 export function validateNormalizedRecord(rec) {
   const errors = [];
   if (!rec || typeof rec !== 'object') return { ok: false, errors: ['record: not an object'] };
@@ -135,6 +145,9 @@ export function validateNormalizedRecord(rec) {
       if (rec[field] === undefined || rec[field] === null) continue;
       checkType(field, type, rec[field], errors);
     }
+  }
+  if (rec.kind === 'user_turn' && typeof rec.origin === 'string' && !USER_ORIGINS.has(rec.origin)) {
+    errors.push(`origin: unknown '${rec.origin}'`);
   }
 
   return { ok: errors.length === 0, errors };
