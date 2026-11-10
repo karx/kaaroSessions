@@ -26,7 +26,7 @@ import {
   GLYPH_GRAPH_R, glyphGraphConfig, glyphGraphPins, graphRectToMinimap,
   NODE_RADII,
   projectGlyphMarkup, projectGlyphSvg, projectGlyphFieldSvg,
-  vitalsLineHtml, vitalsDetailHtml, VITAL_CLASS,
+  vitalsLineHtml, vitalsDetailHtml, VITAL_CLASS, actionLineHtml,
 } from '../experience/client-core.mjs';
 
 test('fmtTok — M/k/plain formatting', () => {
@@ -1328,4 +1328,30 @@ test('vitalsLineHtml — finished turn shows YOUR TURN (ok), not an alarm', () =
 
 test('vitalsLineHtml — no awaiting chip when awaiting is null', () => {
   assert.doesNotMatch(vitalsLineHtml(vs({ awaiting: null }), { phase: true }), /AWAITING|YOUR TURN/);
+});
+
+// ── /now action feed (moved from now.html: actLine) ──────────────────────────
+
+const has = (html, part) => assert.ok(html.includes(part), JSON.stringify(part) + ' in ' + html);
+
+test('actionLineHtml — tool call shows tool + file basename (any slash)', () => {
+  has(actionLineHtml({ type: 'tool_call', tool: 'Edit', where: 'D:\\src\\a\\b.mjs' }),
+    '<span class="g">▸</span><span class="t">Edit</span> b.mjs');
+});
+
+test('actionLineHtml — errors get the err class; text is escaped', () => {
+  const err = actionLineHtml({ type: 'tool_error', tool: 'Bash', error: true });
+  has(err, 'class="act err"');
+  has(err, 'Bash</span> failed');
+  has(actionLineHtml({ type: 'human_turn', text: '<b>hi</b>' }), '&lt;b&gt;hi');
+});
+
+test('actionLineHtml — turn signals and interrupt render (Phase 1.4)', () => {
+  has(actionLineHtml({ type: 'input_required', reason: 'question_tool' }), '?</span>awaiting input · question tool');
+  has(actionLineHtml({ type: 'turn_complete' }), '◆</span>turn complete');
+  has(actionLineHtml({ type: 'interrupt' }), '⏹</span>interrupted by you');
+});
+
+test('actionLineHtml — unknown type falls back to a dot, never throws', () => {
+  has(actionLineHtml({ type: 'mystery' }), '<span class="g">·</span>');
 });

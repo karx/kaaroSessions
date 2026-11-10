@@ -1637,6 +1637,40 @@ export async function shareCard(svgString, title = 'kaaroSessions', text = '', f
   return 'downloaded';
 }
 
+// ── /now action feed (one recent_actions entry → one line) ────────────────────
+
+export const ACT_GLYPH = {
+  tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
+  permission: '⚙', mode_shift: '⚙', api_error: '⊘',
+  input_required: '?', turn_complete: '◆', interrupt: '⏹',
+};
+
+export function actionLineHtml(a) {
+  const g = ACT_GLYPH[a.type] || '·';
+  let body = '';
+  if (a.type === 'tool_call') {
+    const where = a.where ? String(a.where).replace(/\\/g, '/').split('/').pop() : (a.why || '');
+    body = '<span class="t">' + esc(a.tool || '?') + '</span> ' + esc(String(where).slice(0, 44));
+  } else if (a.type === 'tool_error') {
+    body = '<span class="t">' + esc(a.tool || '?') + '</span> failed';
+  } else if (a.type === 'api_error') {
+    body = esc((a.message || 'api error') + (a.code ? ' [' + a.code + ']' : ''));
+  } else if (a.type === 'human_turn') {
+    body = esc(String(a.text || 'prompt').slice(0, 48));
+  } else if (a.type === 'permission' || a.type === 'mode_shift') {
+    body = a.type.replace('_', ' ') + ' → <span class="t">' + esc(a.mode || '?') + '</span>';
+  } else if (a.type === 'compact') {
+    body = 'context compacted';
+  } else if (a.type === 'input_required') {
+    body = 'awaiting input' + (a.reason ? ' · ' + esc(String(a.reason).replace(/_/g, ' ')) : '');
+  } else if (a.type === 'turn_complete') {
+    body = 'turn complete';
+  } else if (a.type === 'interrupt') {
+    body = 'interrupted by you';
+  }
+  return '<div class="act' + (a.error ? ' err' : '') + '"><span class="g">' + g + '</span>' + body + '</div>';
+}
+
 // ── Session vitals (/now: phase · ripeness · health) ─────────────────────────
 // Renders the surface's explainable states (surface/session-vitals.mjs via
 // /api/active). Classes only — page CSS maps them to --k-* tokens.
