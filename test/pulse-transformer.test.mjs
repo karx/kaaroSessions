@@ -336,3 +336,20 @@ test('human_turn pulse — prompt flag: explicit null display_text is a tool-res
   // prompt text is NOT added to the pulse (text keeps first-message semantics)
   assert.equal(mk({ text: null, display_text: 'secret plan' }).data.text, null);
 });
+
+test('human_turn pulse carries origin; prompt = origin is human or command (Phase 1.3)', () => {
+  const mk = nr => normRecordsToPulses([{ kind: 'user_turn', harness: 'claude-code', ts: TS, text: null, ...nr }], CTX)[0];
+  for (const o of ['human', 'command']) {
+    const p = mk({ origin: o, display_text: 'x' });
+    assert.equal(p.data.origin, o);
+    assert.equal(p.data.prompt, true, o);
+  }
+  for (const o of ['tool_result', 'interrupt', 'meta', 'notification', 'compact_summary', 'sidechain']) {
+    const p = mk({ origin: o, display_text: 'injected text' });
+    assert.equal(p.data.origin, o);
+    assert.equal(p.data.prompt, false, o + ' is not a prompt even with text');
+  }
+  // harnesses without origin: unchanged display_text rule, origin defaults to human
+  assert.equal(mk({ display_text: 'go' }).data.origin, 'human');
+  assert.equal(mk({ display_text: null }).data.prompt, false);
+});

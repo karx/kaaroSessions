@@ -122,11 +122,14 @@ function transformRecord(nr, ctx, capabilities) {
     }
 
     case 'human_turn': {
+      // origin (user_turn NR) says who produced the row; only the person
+      // typing (human / command) is a prompt. Adapters without origin: an
+      // explicitly null display_text marks a tool-result row, else human.
+      const origin = nr.origin ?? (nr.display_text === null ? 'tool_result' : 'human');
       return {
         event: 'human_turn',
-        // prompt: false only when the adapter says display_text is explicitly
-        // null (CC tool_result-only user rows). Absent field → a real prompt.
-        data: { ...env, text: nr.text || null, prompt: nr.display_text !== null },
+        data: { ...env, text: nr.text || null, origin,
+          prompt: origin === 'human' || origin === 'command' },
       };
     }
 
