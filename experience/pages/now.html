@@ -192,6 +192,7 @@
   const ACT_GLYPH = {
     tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
     permission: '⚙', mode_shift: '⚙', api_error: '⊘',
+    input_required: '?', turn_complete: '◆',
   };
 
   function actLine(a) {
@@ -210,6 +211,10 @@
       body = a.type.replace('_', ' ') + ' → <span class="t">' + esc(a.mode || '?') + '</span>';
     } else if (a.type === 'compact') {
       body = 'context compacted';
+    } else if (a.type === 'input_required') {
+      body = 'awaiting input' + (a.reason ? ' · ' + esc(String(a.reason).replace(/_/g, ' ')) : '');
+    } else if (a.type === 'turn_complete') {
+      body = 'turn complete';
     }
     return '<div class="act' + (a.error ? ' err' : '') + '"><span class="g">' + g + '</span>' + body + '</div>';
   }

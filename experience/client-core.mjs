@@ -1653,6 +1653,15 @@ export const VERDICT_GLYPH = { ok: '✓', info: '·', warn: '!', bad: '✖', na:
 export function vitalsLineHtml(s, caps = {}) {
   if (!s || (!s.health && s.phase === undefined)) return '';
   const bits = [];
+  // Ball in the human's court leads the line: a request is a warn, a plain
+  // finished turn is ok (not an alarm).
+  const aw = s.awaiting;
+  if (aw) {
+    const ask = aw.event === 'input_required';
+    bits.push('<span class="' + (ask ? 'v-warn' : 'v-ok') + '">◆ ' +
+      (ask ? 'AWAITING INPUT' : 'YOUR TURN') + '</span>' +
+      (aw.seconds != null ? ' <b>' + fmtAgo(aw.seconds) + '</b>' : ''));
+  }
   if (caps.phase === false) {
     bits.push('PHASE <span class="v-dim">—</span>');
   } else {

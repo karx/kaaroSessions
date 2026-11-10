@@ -1314,3 +1314,18 @@ test('vitalsDetailHtml — escapes values and notes', () => {
   assert.ok(!h.includes('<x>'));
   assert.match(h, /&lt;x&gt;/);
 });
+
+test('vitalsLineHtml — awaiting input leads the line (warn), with how long', () => {
+  const h = vitalsLineHtml(vs({ awaiting: { event: 'input_required', reason: 'approval', seconds: 75 } }), { phase: true });
+  assert.match(h, /^<div class="vitals"><span class="v-warn">◆ AWAITING INPUT<\/span> <b>1m15s<\/b> · PHASE/);
+});
+
+test('vitalsLineHtml — finished turn shows YOUR TURN (ok), not an alarm', () => {
+  const h = vitalsLineHtml(vs({ awaiting: { event: 'turn_complete', reason: 'end_turn', seconds: 4 } }), { phase: true });
+  assert.match(h, /<span class="v-ok">◆ YOUR TURN<\/span> <b>4s<\/b>/);
+  assert.doesNotMatch(h, /AWAITING/);
+});
+
+test('vitalsLineHtml — no awaiting chip when awaiting is null', () => {
+  assert.doesNotMatch(vitalsLineHtml(vs({ awaiting: null }), { phase: true }), /AWAITING|YOUR TURN/);
+});
