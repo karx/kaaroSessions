@@ -21,7 +21,10 @@ const AGENT_EVENTS = new Set(['tool_call', 'tool_error', 'tool_result', 'tokens'
 // Pulses that end an awaiting state: the human answered/prompted, or the agent
 // resumed. tokens are excluded (usage rides the same batch as the signal), and
 // so is the asking tool's own tool_call (AskUserQuestion → input_required → tool_call).
-const RESUME_EVENTS = new Set(['human_turn', 'tool_result', 'tool_error', 'words', 'chirp', 'thinking', 'compact', 'tool_call']);
+// human_turn is handled by origin (injected rows must not clear it).
+const RESUME_EVENTS = new Set(['tool_result', 'tool_error', 'words', 'chirp', 'thinking', 'compact', 'tool_call']);
+// human_turn origins that hand the ball back: typed, interrupted, or answered.
+const ORIGIN_RESUMES = new Set(['human', 'command', 'interrupt', 'tool_result']);
 const ASKING_TOOL = /^(AskUserQuestion|ExitPlanMode)$|(^|[._])request_user_input(_async)?$/;
 const PLAN_REF = /(^|\/)(RFC-[^/]*|[^/]*PLAN[^/]*|EXECUTION\.md)$|\/plans?\//i;
 
@@ -175,15 +178,23 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       if (data.preview) e.last_preview = data.preview;
       break;
 
-    case 'human_turn':
-      if (data.prompt !== false) {
+    case 'human_turn': {
+      // origin (pulse-transformer) says who produced the row. Only the person
+      // typing opens a round; injected rows (subagent prompts, skill bodies,
+      // notifications, compact summaries) leave the parent's round alone.
+      const origin = data.origin ?? (data.prompt === false ? 'tool_result' : 'human');
+      if (ORIGIN_RESUMES.has(origin)) e.awaiting = null;
+      if (origin === 'interrupt') {
+        pushAction(e, { type: 'interrupt', ts: now });
+      } else if (data.prompt !== false && (origin === 'human' || origin === 'command')) {
         closeRound(e);
         e.last_prompt_at = now;
+        e.human_turns++;
+        e.last_human_ts = now;
+        pushAction(e, { type: 'human_turn', ts: now, text: data.text ?? null });
       }
-      e.human_turns++;
-      e.last_human_ts = now;
-      pushAction(e, { type: 'human_turn', ts: now, text: data.text ?? null });
       break;
+    }
 
     case 'compact':
       e.compacts++;

@@ -419,3 +419,51 @@ test('awaiting — signals land in recent_actions', () => {
   const a = snapshotActive(st, T0).sessions[0].recent_actions.at(-1);
   assert.deepEqual(a, { type: 'input_required', ts: T0, reason: 'final_question' });
 });
+
+// ── origin (Phase 1.4): only the person typing opens a round ─────────────────
+
+const userRow = (origin, extra = {}) =>
+  pulse('human_turn', { text: null, origin, prompt: origin === 'human' || origin === 'command', ...extra });
+
+test('origin — injected rows (sidechain/meta/notification/compact_summary/tool_result) never open a round', () => {
+  for (const origin of ['sidechain', 'meta', 'notification', 'compact_summary', 'tool_result']) {
+    const st = createActiveState();
+    applyPulse(st, prompt(), T0);
+    applyPulse(st, tc('read'), T0 + 1000);
+    applyPulse(st, userRow(origin), T0 + 2000);   // e.g. Agent dispatch → subagent prompt row
+    applyPulse(st, tc('read'), T0 + 3000);
+    const s = snapshotActive(st, T0 + 3000).sessions[0];
+    assert.equal(s.human_turns, 1, origin + ' is not a human turn');
+    assert.equal(s.lead_in.turns, 1, origin + ' did not close the thinking round');
+    assert.equal(s.time_in_phase_s, 2, origin + ' did not restart the phase clock');
+  }
+});
+
+test('origin — command opens a round like a typed prompt', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read'), T0 + 1000);
+  applyPulse(st, userRow('command'), T0 + 2000);
+  assert.equal(snapshotActive(st, T0 + 2000).sessions[0].human_turns, 2);
+});
+
+test('origin — injected rows keep awaiting; prompt / interrupt clear it', () => {
+  for (const [origin, cleared] of [['sidechain', false], ['meta', false], ['notification', false],
+    ['compact_summary', false], ['human', true], ['command', true], ['interrupt', true]]) {
+    const st = createActiveState();
+    applyPulse(st, pulse('input_required', { reason: 'question_tool' }), T0);
+    applyPulse(st, userRow(origin), T0 + 1000);
+    assert.equal(snapshotActive(st, T0 + 1000).sessions[0].awaiting === null, cleared, origin);
+  }
+});
+
+test('origin — interrupt is an action in the feed, not a human turn or new round', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read'), T0 + 1000);
+  applyPulse(st, userRow('interrupt'), T0 + 2000);
+  const s = snapshotActive(st, T0 + 2000).sessions[0];
+  assert.equal(s.human_turns, 1);
+  assert.equal(s.lead_in.turns, 1);
+  assert.deepEqual(s.recent_actions.at(-1), { type: 'interrupt', ts: T0 + 2000 });
+});
