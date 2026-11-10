@@ -186,7 +186,7 @@ export function recordsToNormalized(records) {
         out.push(cbNR);
         if (bt === 'tool_use') {
           const name = block.name || 'unknown';
-          const signal = inputToolSignal(name, block.id, HARNESS, ts);
+          const signal = rec.isSidechain ? null : inputToolSignal(name, block.id, HARNESS, ts);
           if (signal) out.push(signal);
           const isBash = ['bash', 'powershell', 'shell', 'run_command'].includes(name.toLowerCase());
           const category = isBash ? categorizeBash(block.input?.command) : null;
@@ -200,7 +200,9 @@ export function recordsToNormalized(records) {
       }
     }
 
-    if (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn') {
+    // Subagent transcripts tail into the parent session — a sidechain finishing
+    // (or asking) is not the main turn ending, so it must not ring the parent.
+    if (rec.type === 'assistant' && !rec.isSidechain && rec.message?.stop_reason === 'end_turn') {
       const text = extractTextFromContent(rec.message.content);
       out.push(finalTurnSignal(text, HARNESS, ts, rec.message.id || rec.uuid));
     }

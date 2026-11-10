@@ -68,3 +68,13 @@ test('Aborted turns and permission-mode changes do not create completion or inpu
   assert.equal(signals(codex([{ type: 'event_msg', payload: { type: 'turn_aborted' } }])).length, 0);
   assert.equal(signals(claude([{ type: 'permission-mode', permissionMode: 'default' }])).length, 0);
 });
+
+test('Claude subagent (sidechain) records never signal the parent session', () => {
+  // Subagent JSONL under <session>/subagents/ is tailed into the PARENT session;
+  // a subagent finishing is not the main turn finishing.
+  const result = signals(claude([
+    { type: 'assistant', isSidechain: true, message: { id: 'sub-done', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Which file should I read next?' }] } },
+    { type: 'assistant', isSidechain: true, message: { id: 'sub-ask', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'q2', input: {} }] } },
+  ]));
+  assert.deepEqual(result, []);
+});
