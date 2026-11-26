@@ -212,7 +212,18 @@ breaks no tests.
 
 ---
 
-## Phase 5 — Single source of truth for instruments & docs ⬜ (follow-up PR)
+## Phase 5 — Single source of truth for instruments & docs ✅ (follow-up PR)
+
+**Landed:** 5.1 `1627cdc` · 5.2 `bc534cb` · 5.3 (docs commit).
+- 5.1: the source is `experience/client-core.mjs` `INSTRUMENTS`, not the registry: it is the
+  only module both the browser bundles and Node already share, so no new build injection is
+  needed. The registry's `PLAYABLE_INSTRUMENTS` / `PLAYABLE_FALLBACK` / `playableInstrument`
+  derive from it. The 🔴 drift test became a permanent guard (the copies are gone): the
+  engine's `INSTS` and `INST_DUR` equal the catalogue; 14/15/19 hold no instrument list.
+- 5.2: `fallbackInst` = `PLAYABLE_FALLBACK`; copy fixed (stand-ins are not harp). The page
+  keeps its own 10-voice synth subset; a test checks that every registry default plays on it.
+- End hypothesis, measured: an instrument = one catalogue entry + synth + duration in
+  `14-pulse-audio.js`. Remaining `'woodblock'` hits are preset choices, not lists.
 
 **Rationale.** The playable-instrument list is copied by hand in about 8 places and has
 already drifted (`public/index.html:659` still maps `woodblock → pling`). Every new
@@ -284,3 +295,4 @@ Node 18/20/22, and every live checklist item behaves as stated.
 - 2026-11-10 — Phases 0 + 1 landed (9 commits); 1978 green. Next: Phase 2.
 - 2026-11-26 — Phases 2, 3, 4.1, 4.2 landed (10 commits); 1997 green. Merge gates closed.
   Next: Phase 6 live checklist (browser + live CC session), release 1.3.0; 4.3 + 5 follow-up.
+- 2026-11-26 — Phase 5 landed (3 commits); 2002 green. Next: 4.3, Phase 6.
