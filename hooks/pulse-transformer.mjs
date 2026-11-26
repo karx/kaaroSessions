@@ -67,7 +67,8 @@ function transformRecord(nr, ctx, capabilities) {
       const why   = nr.input?.command || nr.input?.description || null;
       return {
         event: 'tool_call',
-        data: { ...env, tool: nr.tool, key, intent: toolIntent(nr.tool, nr.input), where, why, category: key },
+        data: { ...env, tool: nr.tool, tool_id: nr.tool_id ?? null, key,
+          intent: toolIntent(nr.tool, nr.input), where, why, category: key },
       };
     }
 

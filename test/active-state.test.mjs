@@ -410,11 +410,20 @@ test('awaiting — null by default', () => {
 
 test('awaiting — input_required sets it; the asking tool call + tokens in the same batch do not clear it', () => {
   const st = createActiveState();
-  applyPulse(st, pulse('input_required', { reason: 'question_tool' }), T0);
-  applyPulse(st, pulse('tool_call', { tool: 'AskUserQuestion', key: 'other' }), T0);
+  applyPulse(st, pulse('input_required', { reason: 'question_tool', signal_id: 'q1' }), T0);
+  applyPulse(st, pulse('tool_call', { tool: 'AskUserQuestion', key: 'other', tool_id: 'q1' }), T0);
   applyPulse(st, pulse('tokens', { output: 10 }), T0);
   const s = snapshotActive(st, T0 + 30_000).sessions[0];
   assert.deepEqual(s.awaiting, { event: 'input_required', reason: 'question_tool', seconds: 30 });
+});
+
+test('awaiting — the asking tool is matched by id, not by name', () => {
+  const st = createActiveState();
+  applyPulse(st, pulse('input_required', { reason: 'question_tool', signal_id: 'call-7' }), T0);
+  applyPulse(st, pulse('tool_call', { tool: 'some_renamed_ask_tool', key: 'other', tool_id: 'call-7' }), T0);
+  assert.notEqual(snapshotActive(st, T0).sessions[0].awaiting, null);
+  applyPulse(st, pulse('tool_call', { tool: 'AskUserQuestion', key: 'other', tool_id: 'call-8' }), T0 + 1000);
+  assert.equal(snapshotActive(st, T0 + 1000).sessions[0].awaiting, null);
 });
 
 test('awaiting — turn_complete sets it with its reason', () => {

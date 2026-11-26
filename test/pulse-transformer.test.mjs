@@ -54,6 +54,16 @@ test('tool_use NR → tool_call pulse preserves where from file_path', () => {
   assert.equal(pulse.data.where, 'out/result.mjs');
 });
 
+test('tool_use NR → tool_call pulse carries tool_id (matches input_required.signal_id)', () => {
+  const nrs = [
+    { kind: 'tool_use', harness: 'claude-code', ts: TS, tool: 'AskUserQuestion', tool_id: 'toolu_1', input: {} },
+    { kind: 'tool_use', harness: 'claude-code', ts: TS, tool: 'Read', input: {} },
+  ];
+  const [withId, withoutId] = normRecordsToPulses(nrs, CTX);
+  assert.equal(withId.data.tool_id, 'toolu_1');
+  assert.equal(withoutId.data.tool_id, null);
+});
+
 // ── tokens NR → tokens pulse ─────────────────────────────────────────────────
 
 test('tokens NR → tokens pulse', () => {

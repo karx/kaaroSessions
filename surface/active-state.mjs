@@ -20,12 +20,12 @@ import { assessRipeness, assessHealth } from './session-vitals.mjs';
 const AGENT_EVENTS = new Set(['tool_call', 'tool_error', 'tool_result', 'tokens', 'words', 'chirp', 'thinking']);
 // Pulses that end an awaiting state: the human answered/prompted, or the agent
 // resumed. tokens are excluded (usage rides the same batch as the signal), and
-// so is the asking tool's own tool_call (AskUserQuestion → input_required → tool_call).
+// so is the asking tool's own tool_call — matched by id (input_required.signal_id
+// = tool_call.tool_id), so the surface never needs harness tool names.
 // human_turn is handled by origin (injected rows must not clear it).
 const RESUME_EVENTS = new Set(['tool_result', 'tool_error', 'words', 'chirp', 'thinking', 'compact', 'tool_call']);
 // human_turn origins that hand the ball back: typed, interrupted, or answered.
 const ORIGIN_RESUMES = new Set(['human', 'command', 'interrupt', 'tool_result']);
-const ASKING_TOOL = /^(AskUserQuestion|ExitPlanMode)$|(^|[._])request_user_input(_async)?$/;
 const PLAN_REF = /(^|\/)(RFC-[^/]*|[^/]*PLAN[^/]*|EXECUTION\.md)$|\/plans?\//i;
 
 function newRound() { return { tools: 0, do: 0, verify: 0, activity: 0 }; }
@@ -124,15 +124,14 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
   if (!e.project && data.project) e.project = data.project; // backfill (opencode part pulses lack it)
   if (AGENT_EVENTS.has(event)) { e.last_agent_at = now; e.last_agent_seq = e.seq; e.round.activity++; }
 
-  if (e.awaiting && RESUME_EVENTS.has(event)
-      && !(event === 'tool_call' && ASKING_TOOL.test(String(data.tool ?? '')))) {
-    e.awaiting = null;
-  }
+  const isAskingCall = event === 'tool_call' && data.tool_id != null
+    && data.tool_id === e.awaiting?.signal_id;
+  if (e.awaiting && RESUME_EVENTS.has(event) && !isAskingCall) e.awaiting = null;
 
   switch (event) {
     case 'turn_complete':
     case 'input_required':
-      e.awaiting = { event, reason: data.reason ?? null, since: now };
+      e.awaiting = { event, reason: data.reason ?? null, signal_id: data.signal_id ?? null, since: now };
       pushAction(e, { type: event, ts: now, reason: data.reason ?? null });
       break;
 
