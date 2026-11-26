@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { RECORD_KINDS, KIND_FIELDS } from '../hooks/normalized-record.mjs';
 import { HARNESS_IDS } from '../hooks/registry.mjs';
-import { EVENT_TYPES } from '../experience/audio/event-registry.mjs';
+import { EVENT_TYPES, PLAYABLE_FALLBACK } from '../experience/audio/event-registry.mjs';
 
 const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 
@@ -150,6 +150,18 @@ test('audio-seed — kindSonic maps every RECORD_KIND to a registry key or null'
   for (const [kind, key] of Object.entries(a.kindSonic)) {
     if (key == null) continue;
     assert.ok(EVENT_TYPES[key], kind + ' sonic key missing from EVENT_TYPES: ' + key);
+  }
+});
+
+test('audio-seed — stand-in voices match the live engine; every default plays on this page', () => {
+  const a = audioOf();
+  assert.deepEqual(a.fallbackInst, PLAYABLE_FALLBACK);
+  const block = html.slice(html.indexOf('  const INSTS = {'), html.indexOf('  function playEvent('));
+  const synths = new Set([...block.matchAll(/^    (\w+)\(c, at,/gm)].map(m => m[1]));
+  for (const e of a.events) {
+    if (e.instrument === 'off') continue;
+    const heard = a.fallbackInst[e.instrument] || e.instrument;
+    assert.ok(synths.has(heard), e.key + ' plays ' + heard + ', which this page does not synthesise');
   }
 });
 

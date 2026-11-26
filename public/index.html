@@ -335,7 +335,7 @@
       <div style="font-size:13px; color:#6b6b6b; margin-bottom:16px; max-width:720px;">
         Pulse keys become notes. Silent until you enable audio &mdash; the first click creates an
         AudioContext on this machine, nothing is uploaded. Registry names without a synth
-        (pad, click, chime, sweep, tick, woodblock) fall back to harp, matching the live engine.
+        (pad, click, chime, sweep, tick) play the same stand-in voices as the live engine.
       </div>
       <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
         <button class="nr-chip audio" id="audio-enable" type="button">♪ enable audio</button>
@@ -656,8 +656,8 @@
     "unknown_record": "unknown"
   },
   "fallbackInst": {
-    "pad": "bell", "woodblock": "pling", "click": "pling",
-    "chime": "bell", "sweep": "kick", "tick": "hat"
+    "pad": "bell", "click": "pling", "chime": "bell",
+    "tick": "hat", "sweep": "kick"
   },
   "events": [
     {"key":"turn_complete","family":"context","instrument":"bell","pan":0,"sendAmt":0.12,"brightness":3500,"volMult":0.7,"octave":-1,"desc":"Assistant completed a turn"},
