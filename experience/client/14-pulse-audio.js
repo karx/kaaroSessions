@@ -403,6 +403,9 @@
     if (!_batchBuf.length) return;
     const buf = _batchBuf.splice(0);
     const c   = ac(); if (!c) return;
+    // Autoplay-blocked (suspended) clock is frozen: voices queued now would all
+    // fire at once on the first gesture. Drop them; the viz sink already has them.
+    if (c.state !== 'running') return;
     const now = c.currentTime;
     // Keep alert phrases intact: burst reduction must not drop their notes.
     const phrases = buf.filter(v => v.notes);

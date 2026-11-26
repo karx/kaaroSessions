@@ -60,7 +60,7 @@ test('Preview schedules all four notes for alerts but just one for ordinary rows
 test('Live burst reduction cannot discard or reharmonize a notification phrase', () => {
   const c = harness();
   const played = [];
-  c.ac = () => ({ currentTime: 1 });
+  c.ac = () => ({ currentTime: 1, state: 'running' });
   c.coalesceVoices = voices => {
     assert.equal(voices.length, 1, 'ordinary events alone go through burst reduction');
     return { audible: [] };
