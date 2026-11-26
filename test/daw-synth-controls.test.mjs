@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as core from '../experience/client-core.mjs';
 
 const builder = fs.readFileSync(new URL('../experience/client/19-daw-builder.js', import.meta.url), 'utf8');
 const synthSource = builder.slice(builder.indexOf('  const SYNTH_KEYS ='), builder.indexOf('  // ── SIM tab'));
@@ -19,7 +20,7 @@ const calmOctaves = Object.fromEntries(Object.keys(calmInstruments).map(key =>
 
 test('Fresh visits start with the screenshot Calm Groove settings', () => {
   for (const raw of [null, '{invalid']) {
-    const context = vm.createContext({ window: {}, localStorage: { getItem: key => key === 'kaaro-audio-settings' ? raw : null } });
+    const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: key => key === 'kaaro-audio-settings' ? raw : null } });
     vm.runInContext(settingsSource, context);
     const settings = JSON.parse(JSON.stringify(context.window.AUDIO_SETTINGS));
     assert.deepEqual(settings.instruments, calmInstruments);
@@ -35,7 +36,7 @@ test('Saved choices override Calm Groove defaults and survive reopening', () => 
   const storage = new Map([['kaaro-audio-settings', JSON.stringify({ instruments: { thinking:'flute' }, octaves: { read:1 }, scale:'blues' })]]);
   const localStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
   for (let visit = 0; visit < 2; visit++) {
-    const context = vm.createContext({ window: {}, localStorage });
+    const context = vm.createContext({ ...core, window: {}, localStorage });
     vm.runInContext(settingsSource, context);
     assert.equal(context.window.AUDIO_SETTINGS.instruments.thinking, 'flute');
     assert.equal(context.window.AUDIO_SETTINGS.instruments.chirp, 'tom');
@@ -75,7 +76,7 @@ function synthHarness() {
   const previews = [];
   window.previewInstrument = name => previews.push(name);
   window.updateAudioSettings = patch => Object.assign(window.AUDIO_SETTINGS, patch);
-  const context = vm.createContext({ window, document: { createElement: tag => new Element(tag), getElementById: () => null } });
+  const context = vm.createContext({ ...core, window, document: { createElement: tag => new Element(tag), getElementById: () => null } });
   vm.runInContext(synthSource, context);
   const render = () => {
     const body = new Element('div');
@@ -111,7 +112,7 @@ test('Manually selected scale overrides a saved profile when a new window loads'
   const storage = new Map([['kaaro-audio-profile', JSON.stringify({ scale: 'major_pentatonic' })]]);
   const localStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
   const load = () => {
-    const context = vm.createContext({ window: {}, localStorage });
+    const context = vm.createContext({ ...core, window: {}, localStorage });
     vm.runInContext(settingsSource, context);
     return context.window;
   };
@@ -144,7 +145,7 @@ test('Synth offers persisted overall and individual octave controls', () => {
 });
 
 test('An overall octave down halves live pitch; individual offsets add to mapping rules', () => {
-  const context = vm.createContext({ window: {}, localStorage: { getItem: () => null } });
+  const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: () => null } });
   vm.runInContext(engine.slice(0, engine.indexOf('  // ── AudioContext + master bus')) + '\n})();', context);
   context.SCALES = context.window.AUDIO_SCALES;
   vm.runInContext(engine.slice(engine.indexOf('  const ROOTS ='), engine.indexOf('  // ── Beat scheduler')), context);
@@ -158,7 +159,7 @@ test('An overall octave down halves live pitch; individual offsets add to mappin
 });
 
 test('Instrument previews use the same overall and per-key pitch as live events', () => {
-  const context = vm.createContext({ window: {}, localStorage: { getItem: () => null } });
+  const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: () => null } });
   vm.runInContext(engine.slice(0, engine.indexOf('  // ── AudioContext + master bus')) + '\n})();', context);
   context.SCALES = context.window.AUDIO_SCALES;
   vm.runInContext(engine.slice(engine.indexOf('  const ROOTS ='), engine.indexOf('  // ── Beat scheduler')), context);
@@ -166,7 +167,6 @@ test('Instrument previews use the same overall and per-key pitch as live events'
   context.resolveSonic = context.window.resolveSonicForEvent;
   context.COG_SOUND = {};
   context.INSTS = { harp: (c, at, hz) => pitches.push(hz) };
-  context.PERC = new Set();
   context._masterGain = {};
   context.ac = () => ({ currentTime: 0, createGain: () => ({ gain: {}, connect() {} }) });
   vm.runInContext(engine.slice(engine.indexOf('  window.previewInstrument ='), engine.indexOf('  // ── Beat ring buffer')), context);
@@ -183,7 +183,7 @@ test('Audio enabled choice survives new windows and turning it off is remembered
   const load = () => {
     const listeners = {};
     const button = { style: {}, addEventListener: (type, fn) => { if (type === 'click') button.clickHandler = fn; } };
-    const context = vm.createContext({ window: { location: { protocol: 'http:' } }, localStorage,
+    const context = vm.createContext({ ...core, window: { location: { protocol: 'http:' } }, localStorage,
       clearInterval,
       KAARO_TOKENS: {}, document: { createElement: () => button, body: { appendChild() {} },
         addEventListener: (type, fn) => { listeners[type] = fn; }, removeEventListener: type => { delete listeners[type]; } } });
@@ -224,7 +224,7 @@ test('Snare rolls off harsh highs and fades into its attack', () => {
 });
 
 test('Calm Groove preset restores the screenshot instruments and octaves', () => {
-  const context = vm.createContext({ window: {}, document: { getElementById: () => null } });
+  const context = vm.createContext({ ...core, window: {}, document: { getElementById: () => null } });
   vm.runInContext(builder.slice(builder.indexOf('  const DAW_PRESETS ='), builder.indexOf('  // ── PROF tab')), context);
   context.window.updateAudioSettings = settings => { context.window.settings = settings; };
   context.window.updateAudioProfile = profile => { context.window.profile = profile; };
@@ -275,7 +275,7 @@ test('Thinking instrument and octave can be changed and restored when the tab is
 
 test('Applying a preset replaces instruments from the defaults — earlier choices do not leak through', () => {
   const applyIn = (setup) => {
-    const context = vm.createContext({ window: {}, localStorage: { getItem: () => null, setItem() {} },
+    const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: () => null, setItem() {} },
       document: { getElementById: () => null } });
     vm.runInContext(settingsSource, context);
     context.window.updateAudioProfile = () => {};

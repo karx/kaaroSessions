@@ -490,7 +490,6 @@
     'attachment', 'scaffold', 'thinking', 'tool_error', 'api_error',
   ];
   const MATCH_HARNESSES = ['claude-code', 'pi', 'antigravity', 'grok', 'opencode', 'copilot'];
-  const INST_NAMES = ['harp', 'bass', 'bell', 'flute', 'bit', 'pling', 'marimba', 'snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock', 'buzz', 'off'];
   const DEGREE_MODES = ['path_hash', 'sequential', 'random', 'root'];
 
   function buildMapTab(body) {
@@ -624,7 +623,7 @@
     };
 
     const instSel = document.createElement('select'); instSel.className = 'inp inst-sel';
-    instSel.innerHTML = '<option value="">— keep —</option>' + INST_NAMES.map(n => `<option value="${n}"${(r.set.instrument===n)?' selected':''}>${n}</option>`).join('');
+    instSel.innerHTML = '<option value="">— keep —</option>' + INSTRUMENT_OPTIONS.map(({ id: n }) => `<option value="${n}"${(r.set.instrument===n)?' selected':''}>${n}</option>`).join('');
     formDiv.appendChild(mkRow('instrument', instSel));
 
     const makeNumInp = (cls, ph, val) => {
@@ -767,8 +766,8 @@
       const row = document.createElement('div'); row.className = 'inst-row';
       const lbl = document.createElement('div'); lbl.className = 'inst-key'; lbl.textContent = label;
       const sel = document.createElement('select'); sel.className = 'inp inst-sel';
-      sel.innerHTML = ['harp','bass','bell','flute','bit','pling','marimba','snare','kick','hat','rimshot','clap','shaker','tom','woodblock','buzz','off']
-        .map(n => `<option value="${n}"${S2.instruments?.[key]===n?' selected':''}>${n}</option>`).join('');
+      sel.innerHTML = INSTRUMENT_OPTIONS
+        .map(({ id: n }) => `<option value="${n}"${S2.instruments?.[key]===n?' selected':''}>${n}</option>`).join('');
       sel.onchange = () => {
         const patch = { instruments: {} }; patch.instruments[key] = sel.value;
         if (window.updateAudioSettings) window.updateAudioSettings(patch);

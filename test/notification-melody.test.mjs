@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as core from '../experience/client-core.mjs';
 
 const engine = fs.readFileSync(new URL('../experience/client/14-pulse-audio.js', import.meta.url), 'utf8');
 function harness(scale = 'dorian') {
-  const context = vm.createContext({ window: {}, localStorage: { getItem: () => null } });
+  const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: () => null } });
   vm.runInContext(engine.slice(0, engine.indexOf('  // ── AudioContext + master bus')) + '\n})();', context);
   context.SCALES = context.window.AUDIO_SCALES;
   context.window.AUDIO_SETTINGS.scale = scale;
@@ -43,7 +44,6 @@ test('Preview schedules all four notes for alerts but just one for ordinary rows
   c.resolveSonic = c.window.resolveSonicForEvent;
   c.COG_SOUND = { turn_complete: true, input_required: true };
   c.INSTS = { bell: (ctx, at, hz) => played.push({ at, hz }) };
-  c.PERC = new Set();
   c._masterGain = {};
   c.ac = () => ({ currentTime: 1, createGain: () => ({ gain: {}, connect() {} }) });
   vm.runInContext(engine.slice(engine.indexOf('  window.previewInstrument ='), engine.indexOf('  // ── Beat ring buffer')), c);

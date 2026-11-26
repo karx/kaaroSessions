@@ -227,3 +227,8 @@ test('toolNameToKey — unknown returns other', () => {
   assert.equal(toolNameToKey(''),            'other');
   assert.equal(toolNameToKey(null),          'other');
 });
+
+test('PLAYABLE_INSTRUMENTS — derived from the client-core catalogue plus off', async () => {
+  const { INSTRUMENT_IDS } = await import('../experience/client-core.mjs');
+  assert.deepEqual([...PLAYABLE_INSTRUMENTS].sort(), [...INSTRUMENT_IDS, 'off'].sort());
+});

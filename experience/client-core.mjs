@@ -792,7 +792,45 @@ const VOICE_PRIORITY = {
   tokens: 12, thinking: 10, unknown: 8, permission: 8,
 };
 
-const PERC_VOICES = new Set(['snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock']);
+// ── Instrument catalogue ──────────────────────────────────────────────────────
+// The one list of voices the live engine synthesises (14-pulse-audio.js INSTS),
+// in menu order. Every instrument menu, the percussion set and the registry's
+// PLAYABLE_INSTRUMENTS derive from it. Adding an instrument = one entry here +
+// its synth function and duration in 14-pulse-audio.js.
+export const INSTRUMENTS = [
+  { id: 'harp',      label: 'Harp' },
+  { id: 'bass',      label: 'Bass' },
+  { id: 'bell',      label: 'Bell' },
+  { id: 'flute',     label: 'Flute' },
+  { id: 'bit',       label: 'Bit' },
+  { id: 'pling',     label: 'Pling' },
+  { id: 'marimba',   label: 'Marimba' },
+  { id: 'snare',     label: 'Snare',     perc: true },
+  { id: 'kick',      label: 'Kick',      perc: true },
+  { id: 'hat',       label: 'Hi-Hat',    perc: true },
+  { id: 'rimshot',   label: 'Rimshot',   perc: true },
+  { id: 'clap',      label: 'Clap',      perc: true },
+  { id: 'shaker',    label: 'Shaker',    perc: true },
+  { id: 'tom',       label: 'Tom',       perc: true },
+  { id: 'woodblock', label: 'Woodblock', perc: true },
+  { id: 'buzz',      label: 'Buzz' },
+];
+
+export const INSTRUMENT_IDS = INSTRUMENTS.map(i => i.id);
+
+/** Unpitched voices: synth signature `(c, at, vol, out)`; bursts collapse to one hit. */
+export const PERC_VOICES = new Set(INSTRUMENTS.filter(i => i.perc).map(i => i.id));
+
+/** Menu choices: every voice, then `off` (mutes the event). */
+export const INSTRUMENT_OPTIONS = [...INSTRUMENTS, { id: 'off', label: '— Off —' }];
+
+/** Registry names that have no synth yet → the voice that stands in for them. */
+export const INSTRUMENT_FALLBACK = { pad: 'bell', click: 'pling', chime: 'bell', tick: 'hat', sweep: 'kick' };
+
+export function playableInstrument(name) {
+  if (name === 'off' || INSTRUMENT_IDS.includes(name)) return name;
+  return INSTRUMENT_FALLBACK[name] || 'harp';
+}
 
 export function voicePriority(v) {
   const key = v?.sonic?.key || v?.key || '';

@@ -2,24 +2,38 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { playableInstrument } from '../experience/audio/event-registry.mjs';
-import { coalesceVoices } from '../experience/client-core.mjs';
+import * as core from '../experience/client-core.mjs';
+
+const { coalesceVoices, INSTRUMENT_IDS, PERC_VOICES } = core;
 
 const source = name => fs.readFileSync(new URL('../experience/client/' + name, import.meta.url), 'utf8');
 const audio = source('14-pulse-audio.js');
 const percussion = ['rimshot', 'clap', 'shaker', 'tom', 'woodblock'];
 const added = [...percussion, 'marimba'];
 
-test('New instruments resolve directly and are offered in DAW, mapping rules, and Graph settings', () => {
-  for (const name of added) {
-    assert.equal(playableInstrument(name), name);
-    const builder = source('19-daw-builder.js');
-    for (const options of [builder.match(/const INST_NAMES = (\[[^;]+\])/)[1],
-      builder.match(/sel.innerHTML = (\[[^\n]+\])/)[1]]) {
-      assert.ok(options.includes("'" + name + "'"), name + ' is offered in Synth and mapping rules');
-    }
-    assert.ok(source('15-audio-settings.js').includes("'" + name + "'"));
+/** The synth section of 14-pulse-audio.js, run with the client-core globals the page provides. */
+function loadSynths() {
+  const context = vm.createContext({ ...core, window: {} });
+  vm.runInContext(audio.slice(audio.indexOf('  function harp('), audio.indexOf('  window.previewInstrument ='))
+    + '\nwindow.durations = INST_DUR;', context);
+  return context.window;
+}
+
+test('The engine synthesises exactly the catalogue voices, each with a duration', () => {
+  const { INSTS, durations } = loadSynths();
+  assert.deepEqual(Object.keys(INSTS).sort(), [...INSTRUMENT_IDS].sort());
+  assert.deepEqual(Object.keys(durations).sort(), [...INSTRUMENT_IDS].sort());
+  for (const name of added) assert.ok(INSTRUMENT_IDS.includes(name), name);
+});
+
+test('Client modules keep no instrument list of their own — menus derive from the catalogue', () => {
+  const handList = /['"](?:harp|bass|bell)['"]\s*,\s*['"](?:harp|bass|bell)['"]|\['harp','Harp'\]/;
+  for (const name of ['14-pulse-audio.js', '15-audio-settings.js', '19-daw-builder.js']) {
+    assert.doesNotMatch(source(name), handList, name + ' hand-lists instruments');
+    assert.doesNotMatch(source(name), /new Set\(\['snare'/, name + ' hand-lists percussion');
   }
+  assert.match(source('15-audio-settings.js'), /INSTRUMENT_OPTIONS/);
+  assert.match(source('19-daw-builder.js'), /INSTRUMENT_OPTIONS/);
 });
 
 test('New percussion bursts collapse into one hit rather than pitched chords', () => {
@@ -32,11 +46,9 @@ test('New percussion bursts collapse into one hit rather than pitched chords', (
 });
 
 test('All new synths schedule finite bounded voices and connect to the supplied output', () => {
-  const context = vm.createContext({ window: {} });
-  vm.runInContext(audio.slice(audio.indexOf('  function harp('), audio.indexOf('  window.previewInstrument ='))
-    + '\nwindow.percussion = PERC; window.durations = INST_DUR;', context);
+  const window = loadSynths();
   for (const name of added) {
-    assert.equal(context.window.percussion.has(name), percussion.includes(name), name + ' uses the correct signature');
+    assert.equal(PERC_VOICES.has(name), percussion.includes(name), name + ' uses the correct signature');
     const output = {}, connections = [], starts = [], stops = [];
     const param = () => ({ value: 0, setValueAtTime(value, time) { assert.ok(Number.isFinite(value) && Number.isFinite(time)); },
       linearRampToValueAtTime(value, time) { assert.ok(Number.isFinite(value) && Number.isFinite(time)); },
@@ -50,13 +62,13 @@ test('All new synths schedule finite bounded voices and connect to the supplied 
       createGain: () => ({ ...node(), gain: param() }),
       createBiquadFilter: () => ({ ...node(), frequency: param(), Q: param() }),
     };
-    const fn = context.window.INSTS[name];
+    const fn = window.INSTS[name];
     assert.equal(typeof fn, 'function', name);
     if (percussion.includes(name)) fn(c, 1, 0.2, output);
     else fn(c, 1, 220, 0.2, output);
     assert.ok(connections.includes(output), name + ' reaches output');
     assert.ok(starts.length > 0 && stops.length === starts.length, name + ' has bounded voices');
-    assert.ok(stops.every(time => time > 1 && time <= 1 + context.window.durations[name] + 1e-9),
+    assert.ok(stops.every(time => time > 1 && time <= 1 + window.durations[name] + 1e-9),
       name + ' stops within its advertised duration');
   }
 });

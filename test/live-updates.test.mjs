@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as core from '../experience/client-core.mjs';
 import { LIVE_COGNITION_EVENTS, LIVE_PLAYPULSE_EVENTS } from '../experience/client-core.mjs';
 
 const liveSrc = fs.readFileSync(new URL('../experience/client/13-live-updates.js', import.meta.url), 'utf8');
@@ -66,7 +67,7 @@ test('capture-live-feed — playPulse set is LIVE_PLAYPULSE_EVENTS', () => {
 });
 
 test('All Graph sounds have a visible DAW family and mixer assignment', () => {
-  const context = vm.createContext({ window: {}, localStorage: { getItem: () => null } });
+  const context = vm.createContext({ ...core, window: {}, localStorage: { getItem: () => null } });
   vm.runInContext(audioSrc.slice(0, audioSrc.indexOf('  // ── AudioContext + master bus')) + '\n})();', context);
   for (const event of LIVE_PLAYPULSE_EVENTS) {
     const sonic = context.window.resolveSonicForEvent(event, { key: event === 'tool_call' ? 'read' : event });

@@ -5,13 +5,7 @@
 (function() {
 
   // ── Option definitions ────────────────────────────────────────────────────────
-  const INST_OPTS = [
-    ['harp','Harp'],['bass','Bass'],['bell','Bell'],['flute','Flute'],
-    ['bit','Bit'],['pling','Pling'],['snare','Snare'],['kick','Kick'],['hat','Hi-Hat'],
-    ['rimshot','Rimshot'],['clap','Clap'],['shaker','Shaker'],['tom','Tom'],
-    ['woodblock','Woodblock'],['marimba','Marimba'],['buzz','Buzz'],
-    ['off','— Off —'],
-  ];
+  const INST_OPTS = INSTRUMENT_OPTIONS.map(({ id, label }) => [id, label]);
 
   const SCALE_OPTS = [
     ['major_pentatonic','Major Pentatonic  · C D E G A'],

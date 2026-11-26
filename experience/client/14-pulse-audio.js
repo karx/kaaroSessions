@@ -273,9 +273,7 @@
     octave += Number(S.octaves?.[key]) || 0;
     const tmb = (P.timbre && P.timbre[instrument]) || {};
     const fam = key ? (TOOL_FAMILY[key] || null) : null;
-    if (instrument && instrument !== 'off' && !['harp','bass','bell','flute','bit','pling','snare','kick','hat','buzz','rimshot','clap','shaker','tom','woodblock','marimba'].includes(instrument)) {
-      instrument = ({ pad:'bell', click:'pling', chime:'bell', tick:'hat', sweep:'kick' })[instrument] || 'harp';
-    }
+    if (instrument) instrument = playableInstrument(instrument);
     return { key, instrument, volMult, octave, degreeMode, scale, timbre: tmb, fam, pan, sendAmt, brightness };
   }
 
@@ -466,7 +464,7 @@
       endpoint.connect(sg); sg.connect(_reverbConvolver);
     }
     const fn = INSTS[name] || harp;
-    PERC.has(name) ? fn(c, at, vol, filt) : fn(c, at, hz, vol, filt);
+    PERC_VOICES.has(name) ? fn(c, at, vol, filt) : fn(c, at, hz, vol, filt);
 
     const voices = window._scheduledVoices;
     voices.push({
@@ -690,7 +688,6 @@
 
   const INSTS = { harp, bass, bell, flute, bit, pling, snare, kick, hat, buzz, rimshot, clap, shaker, tom, woodblock, marimba };
   window.INSTS = INSTS;
-  const PERC  = new Set(['snare', 'kick', 'hat', 'rimshot', 'clap', 'shaker', 'tom', 'woodblock']);
   const INST_DUR = {
     harp: 0.9, bass: 1.4, bell: 2.5, flute: 0.65, bit: 0.22, pling: 0.48,
     snare: 0.12, kick: 0.25, hat: 0.04, buzz: 0.27,
@@ -708,7 +705,7 @@
     const notes = notificationNotes(key, null, octave, sonic?.scale)
       || [{ hz: noteHz(null, 0, octave), offset: 0 }];
     for (const note of notes) {
-      PERC.has(name) ? fn(c, at + note.offset, undefined, tmpOut)
+      PERC_VOICES.has(name) ? fn(c, at + note.offset, undefined, tmpOut)
         : fn(c, at + note.offset, note.hz, undefined, tmpOut);
     }
   };

@@ -1377,3 +1377,22 @@ test('pulseTickerEntry — human_turn lines only for typed prompts; interrupts g
   const intr = pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'interrupt' });
   assert.deepEqual(intr, { text: '⎋ interrupted  [abc12345]', role: 'human' });
 });
+
+test('instrument catalogue — unique ids, labels, percussion subset, menu ends with off', async () => {
+  const { INSTRUMENTS, INSTRUMENT_IDS, INSTRUMENT_OPTIONS, PERC_VOICES } = await import('../experience/client-core.mjs');
+  assert.equal(new Set(INSTRUMENT_IDS).size, INSTRUMENTS.length, 'ids are unique');
+  assert.ok(INSTRUMENTS.every(i => typeof i.label === 'string' && i.label), 'every voice has a label');
+  assert.ok(!INSTRUMENT_IDS.includes('off'), 'off is a menu choice, not a voice');
+  assert.deepEqual(INSTRUMENT_OPTIONS.map(o => o.id), [...INSTRUMENT_IDS, 'off']);
+  assert.deepEqual([...PERC_VOICES].sort(),
+    ['clap', 'hat', 'kick', 'rimshot', 'shaker', 'snare', 'tom', 'woodblock']);
+});
+
+test('playableInstrument — catalogue voices and off pass through; stand-ins, then harp', async () => {
+  const { playableInstrument, INSTRUMENT_IDS } = await import('../experience/client-core.mjs');
+  for (const id of [...INSTRUMENT_IDS, 'off']) assert.equal(playableInstrument(id), id);
+  assert.deepEqual(['pad', 'click', 'chime', 'tick', 'sweep'].map(playableInstrument),
+    ['bell', 'pling', 'bell', 'hat', 'kick']);
+  assert.equal(playableInstrument('theremin'), 'harp');
+  assert.equal(playableInstrument(''), 'harp');
+});
