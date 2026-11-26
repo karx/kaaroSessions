@@ -66,8 +66,11 @@ export function toolNameToKey(name, category = null) {
 export const SHELL_INTENTS = new Set(['mutate', 'verify', 'read']);
 
 const MUTATE_RES = [
-  /^git\s+(commit|push|add|merge|rebase|reset|stash|cherry-pick|tag|rm|mv|apply|am|revert|pull|checkout\s+-b|switch\s+-c|branch\s+-[dDmM])\b/,
-  /^(sed\s+-i|mv|rm|rmdir|mkdir|cp|touch|chmod|chown|ln|tee|patch|unzip|tar\s+-?x)\b/,
+  // global options (-C dir, -c k=v, --no-pager) may precede the subcommand
+  /^git(?:\s+(?:-[Cc]\s+\S+|--\S+))*\s+(commit|push|add|merge|rebase|reset|stash|cherry-pick|tag|rm|mv|apply|am|revert|pull|restore|clean|checkout\s+-b|switch\s+-c|branch\s+-[dDmM])\b/,
+  /^(sed\s+-i|mv|rm|rmdir|mkdir|cp|touch|chmod|chown|ln|tee|patch|unzip)\b/,
+  // tar extract/create: x or c in the mode word (bundled `xzf` or dashed); -t lists
+  /^tar\s+(?:-?[a-z]*[xc]|.*\s-[a-z]*[xc]|.*--(?:extract|create|get)\b)/,
   /^(npm|pnpm|yarn|bun)\s+(install|i|add|remove|rm|uninstall|ci|update|up)\b/,
   /^pip3?\s+(install|uninstall)\b/,
   /^(new-item|remove-item|set-content|add-content|out-file|move-item|copy-item|rename-item)\b/i,
@@ -86,8 +89,11 @@ const VERIFY_RES = [
 
 // `> file` / `>> file`, but not `2>…`, `>&…`, `=>` / `->` arrows, or
 // `> /dev/null` / `$null`. Quoted text is blanked before this runs.
-const WRITE_REDIRECT = /(^|[^0-9&>=\-])>{1,2}\s*(?!&|\/dev\/null\b|\$null\b|nul\b)\S/i;
+const WRITE_REDIRECT = /(^|[^0-9&>=\-])>>?(?!>)\s*(?!&|\/dev\/null\b|\$null\b|nul\b)\S/i;
 const QUOTED = /"(?:\\.|[^"\\])*"|'[^']*'/g;
+
+// file tools whose canonical key is not write/edit but which still change files
+const MUTATING_TOOLS = new Set(['MultiEdit', 'NotebookEdit']);
 
 const RANK = { read: 0, verify: 1, mutate: 2 };
 
@@ -127,6 +133,6 @@ export function shellIntent(command) {
 export function toolIntent(name, input) {
   if (isBashToolName(name)) return shellIntent(input?.command ?? input?.cmd ?? null);
   const key = toolNameToKey(name);
-  if (key === 'write' || key === 'edit') return 'mutate';
+  if (key === 'write' || key === 'edit' || MUTATING_TOOLS.has(name)) return 'mutate';
   return 'read';
 }

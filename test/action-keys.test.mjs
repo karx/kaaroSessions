@@ -111,3 +111,33 @@ test('toolIntent — shells delegate to shellIntent (command or cmd)', () => {
   assert.equal(toolIntent('shell_command', { command: ['git', 'push'] }), 'mutate');
   assert.equal(toolIntent('Bash', null), null);
 });
+
+test('shellIntent — git global options, restore and clean mutate', () => {
+  assert.equal(shellIntent('git -C ../repo commit -m "x"'), 'mutate');
+  assert.equal(shellIntent('git -c user.name=x commit -m "x"'), 'mutate');
+  assert.equal(shellIntent('git --no-pager log -1'), 'read');
+  assert.equal(shellIntent('git -C ../repo status'), 'read');
+  assert.equal(shellIntent('git restore src/a.mjs'), 'mutate');
+  assert.equal(shellIntent('git clean -fd'), 'mutate');
+});
+
+test('shellIntent — tar extract/create mutates, list reads', () => {
+  assert.equal(shellIntent('tar -xzf a.tgz'), 'mutate');
+  assert.equal(shellIntent('tar xvf a.tar'), 'mutate');
+  assert.equal(shellIntent('tar -C out -xf a.tar'), 'mutate');
+  assert.equal(shellIntent('tar -czf out.tgz dir'), 'mutate');
+  assert.equal(shellIntent('tar --extract -f a.tar'), 'mutate');
+  assert.equal(shellIntent('tar -tzf a.tgz'), 'read');
+  assert.equal(shellIntent('tar --list -f a.tar'), 'read');
+});
+
+test('shellIntent — append to /dev/null is not a write', () => {
+  assert.equal(shellIntent('ls >> /dev/null'), 'read');
+  assert.equal(shellIntent('ls >>/dev/null 2>&1'), 'read');
+  assert.equal(shellIntent('ls >> out.log'), 'mutate');
+});
+
+test('toolIntent — MultiEdit and NotebookEdit mutate', () => {
+  assert.equal(toolIntent('MultiEdit', { file_path: 'a' }), 'mutate');
+  assert.equal(toolIntent('NotebookEdit', { notebook_path: 'a.ipynb' }), 'mutate');
+});
