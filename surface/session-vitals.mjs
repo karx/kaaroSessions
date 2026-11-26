@@ -41,9 +41,15 @@ export const HEALTH_THRESHOLDS = {
 
 const row = (id, value, verdict, note, extra = {}) => ({ id, value, verdict, note, ...extra });
 
+// Event order is (ts, seq): pulses from one tail batch share a ts, and the
+// store's per-session seq says which came first. Without seqs a tie counts as
+// 'at or after' (the conservative reading).
+const atOrAfter = (aTs, aSeq, bTs, bSeq) => aTs > bTs || (aTs === bTs && !(bSeq > aSeq));
+
 /**
  * @param {object} v — { phase, lead_in_turns, last_prompt_at, last_agent_at,
- *   last_seen, plan_ref, has_cache, last_context, last_api_error_at } (epoch ms)
+ *   last_seen, plan_ref, has_cache, last_context, last_api_error_at } (epoch ms),
+ *   plus optional last_agent_seq / last_api_error_seq tie-breakers
  * @param {number} now
  * @returns {{ state: 'fresh'|'ripening'|'ripe'|'overripe'|'stalled'|null, inputs: object[] }}
  */
@@ -78,7 +84,8 @@ export function assessRipeness(v, now, th = RIPENESS_THRESHOLDS) {
     : row('cache', null, 'na', 'harness reports no cache counters'));
 
   const stalled = v.last_api_error_at != null
-    && (v.last_agent_at == null || v.last_api_error_at >= v.last_agent_at);
+    && (v.last_agent_at == null
+      || atOrAfter(v.last_api_error_at, v.last_api_error_seq, v.last_agent_at, v.last_agent_seq));
   if (v.last_api_error_at != null) {
     inputs.push(row('api_error', stalled ? 'unrecovered' : 'recovered',
       stalled ? 'bad' : 'info', stalled ? 'api error is the latest agent event' : 'agent resumed after the error'));
@@ -110,7 +117,8 @@ function callOutcomes(actions) {
 
 /**
  * @param {object} v — { recent_actions, compacts, tokens, has_cache,
- *   last_api_error: { ts }|null, last_tool_at }
+ *   last_api_error: { ts }|null, last_tool_at }, plus optional
+ *   last_api_error_seq / last_tool_seq tie-breakers
  * @returns {{ state: 'ok'|'strained'|'degraded'|'unknown', inputs: object[] }}
  */
 export function assessHealth(v, th = HEALTH_THRESHOLDS) {
@@ -136,7 +144,8 @@ export function assessHealth(v, th = HEALTH_THRESHOLDS) {
     : row('error_streak', null, 'na', 'no tool calls yet'));
 
   if (v.last_api_error) {
-    const unrecovered = v.last_tool_at == null || v.last_api_error.ts >= v.last_tool_at;
+    const unrecovered = v.last_tool_at == null
+      || atOrAfter(v.last_api_error.ts, v.last_api_error_seq, v.last_tool_at, v.last_tool_seq);
     inputs.push(row('api_error', v.last_api_error.code || 'error',
       unrecovered ? 'bad' : 'warn',
       unrecovered ? 'no tool activity since the api error' : 'tools resumed after an api error'));

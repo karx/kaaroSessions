@@ -73,6 +73,12 @@ function getEntry(state, data, now) {
       last_mode: null,
       api_errors: 0,
       last_api_error: null,
+      // seq: per-session pulse counter. Pulses of one tail batch share `now`;
+      // vitals use (ts, seq) to tell which came first.
+      seq: 0,
+      last_agent_seq: null,
+      last_tool_seq: null,
+      last_api_error_seq: null,
       // phase / lead-in / vitals inputs
       round: newRound(),
       phase: null,
@@ -114,8 +120,9 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
   const e = getEntry(state, data, now);
   e.last_seen = now;
   e.last_event = event;
+  e.seq++;
   if (!e.project && data.project) e.project = data.project; // backfill (opencode part pulses lack it)
-  if (AGENT_EVENTS.has(event)) { e.last_agent_at = now; e.round.activity++; }
+  if (AGENT_EVENTS.has(event)) { e.last_agent_at = now; e.last_agent_seq = e.seq; e.round.activity++; }
 
   if (e.awaiting && RESUME_EVENTS.has(event)
       && !(event === 'tool_call' && ASKING_TOOL.test(String(data.tool ?? '')))) {
@@ -141,6 +148,7 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       pushAction(e, { type: 'tool_call', ts: now, tool: data.tool ?? null,
         key: data.key ?? null, where: data.where ?? null, why: data.why ?? null });
       e.last_tool_at = now;
+      e.last_tool_seq = e.seq;
       e.round.tools++;
       if (data.intent === 'mutate') e.round.do++;
       else if (data.intent === 'verify') e.round.verify++;
@@ -214,6 +222,7 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
     case 'api_error':
       e.api_errors++;
       e.last_api_error = { message: data.message ?? null, code: data.code ?? null, ts: now };
+      e.last_api_error_seq = e.seq;
       pushAction(e, { type: 'api_error', ts: now, error: true,
         message: data.message ?? null, code: data.code ?? null });
       break;
@@ -311,6 +320,8 @@ export function snapshotActive(state, now, overrides = {}) {
         has_cache: e.has_cache,
         last_context: e.last_context,
         last_api_error_at: e.last_api_error?.ts ?? null,
+        last_agent_seq: e.last_agent_seq,
+        last_api_error_seq: e.last_api_error_seq,
       }, now),
       health: assessHealth({
         recent_actions: e.recent_actions,
@@ -319,6 +330,8 @@ export function snapshotActive(state, now, overrides = {}) {
         has_cache: e.has_cache,
         last_api_error: e.last_api_error,
         last_tool_at: e.last_tool_at,
+        last_api_error_seq: e.last_api_error_seq,
+        last_tool_seq: e.last_tool_seq,
       }),
     });
 

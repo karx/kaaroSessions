@@ -372,6 +372,26 @@ test('ripeness — api error after the last agent activity → stalled; health d
   assert.equal(s.health.state, 'degraded');
 });
 
+test('ripeness/health — api error then tool call in one tail batch (same now) reads as recovered', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, pulse('api_error', { message: 'overloaded', code: 'overloaded' }), T0 + 1000);
+  applyPulse(st, tc('read'), T0 + 1000);
+  const s = snapshotActive(st, T0 + 2000).sessions[0];
+  assert.notEqual(s.ripeness.state, 'stalled');
+  assert.equal(s.health.inputs.find(i => i.id === 'api_error').verdict, 'warn');
+});
+
+test('ripeness/health — tool call then api error in one tail batch stays unrecovered', () => {
+  const st = createActiveState();
+  applyPulse(st, prompt(), T0);
+  applyPulse(st, tc('read'), T0 + 1000);
+  applyPulse(st, pulse('api_error', { message: 'overloaded', code: 'overloaded' }), T0 + 1000);
+  const s = snapshotActive(st, T0 + 2000).sessions[0];
+  assert.equal(s.ripeness.state, 'stalled');
+  assert.equal(s.health.inputs.find(i => i.id === 'api_error').verdict, 'bad');
+});
+
 test('health — snapshot carries state + inputs from the recent-actions ring', () => {
   const st = createActiveState();
   for (let i = 0; i < 6; i++) applyPulse(st, tc('read'), T0 + i);
