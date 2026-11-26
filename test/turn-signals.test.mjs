@@ -10,7 +10,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 const ctx = { harness: 'codex', session_id: 'test', slug: 'test', project_label: 'test' };
-const complete = { type: 'event_msg', timestamp: new Date().toISOString(),
+// Fixed epochs: the emitter gets startedAt injected, so no test depends on the wall clock.
+const STARTED_AT = Date.parse('2026-01-01T00:00:00Z');
+const complete = { type: 'event_msg', timestamp: '2026-01-01T00:00:05Z',
   payload: { type: 'task_complete', turn_id: 'turn-1', last_agent_message: 'The tests pass.' } };
 const signals = records => records.filter(r => ['turn_complete', 'input_required'].includes(r.kind));
 
@@ -26,7 +28,7 @@ test('Codex emits one completion from task_complete, not commentary or token cou
   assert.equal(pulses[0].data.signal_id, 'turn-1');
 });
 
-test('Final requests for an answer become Input Required; ordinary questions in commentary do not', () => {
+test('Codex final message asking a question becomes Input Required', () => {
   const result = signals(codex([{ ...complete, payload: { ...complete.payload, last_agent_message: 'Which option would you prefer?' } }]));
   assert.equal(result[0]?.kind, 'input_required');
   assert.equal(result[0]?.reason, 'final_question');
@@ -54,7 +56,8 @@ test('Repeated completion records across separate tails broadcast only once', ()
   try {
     const file = path.join(dir, 'session.jsonl');
     const emitted = [];
-    const emitter = createPulseEmitter({ hub: { notify: (event, data) => emitted.push({ event, data }) }, activeState: createActiveState() });
+    const emitter = createPulseEmitter({ hub: { notify: (event, data) => emitted.push({ event, data }) },
+      activeState: createActiveState(), startedAt: STARTED_AT, now: () => STARTED_AT + 10_000 });
     const old = { ...complete, timestamp: '2020-01-01T00:00:00Z', payload: { ...complete.payload, turn_id: 'old' } };
     fs.writeFileSync(file, JSON.stringify(old) + '\n' + JSON.stringify(complete) + '\n');
     emitter.tailAndPulse(file, ctx);
