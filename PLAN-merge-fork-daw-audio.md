@@ -113,7 +113,11 @@ adapter just throws those tags away. Per the two-layer rule, harness specifics s
 
 ---
 
-## Phase 2 — Signal accuracy ⬜ (merge gate)
+## Phase 2 — Signal accuracy ✅ (merge gate)
+
+**Landed:** 2.1 `fe35972` · 2.2 `32f4f16` · 2.3 `f62133f` · 2.4 `44ee810`.
+`grep AskUserQuestion surface/` → 0. 2.2 also covers `tar -czf` (create writes files) and
+`git --no-pager` / `-c k=v` global options. 2.4: `tool_call` pulses now carry `tool_id`.
 
 **Rationale.** Vitals and alerts are only worth as much as their inputs. Each item below was
 reproduced with `node` against the current code.
@@ -147,7 +151,16 @@ batch. `grep AskUserQuestion surface/` → no matches.
 
 ---
 
-## Phase 3 — Audio correctness ⬜ (merge gate)
+## Phase 3 — Audio correctness ✅ (merge gate)
+
+**Landed:** 3.1 `0f38167` · 3.2 `1e97d28` · 3.3 `d087196`.
+- 3.1: `_flushBatch` schedules only while the context is `running`; no `_beatAt` reset needed
+  because the clock is never advanced while suspended.
+- 3.2: the four built-in presets define the same 11 instruments, so the order dependence
+  showed up through Synth-tab edits surviving a preset; fixed by replacing from `AUDIO_DEFAULTS`.
+- 3.3: one rule, `client-core` `humanTurnEvent()`, used by `playPulse`, the ticker (which had
+  the same bug) and `audio-sim`. D1 taken at its default. Real-data replay: bells 65→13
+  (eb64c814), →8 (f22d728b), →5 (5ca8614f), each = human + command rows; interrupts heard once.
 
 **Rationale.** These are the user-audible defects. #3 also grows memory.
 
@@ -175,7 +188,7 @@ equal human prompts; each interrupt can be heard on its own.
 
 ---
 
-## Phase 4 — Determinism & test hygiene ⬜ (4.1, 4.2 before merge; 4.3 may follow)
+## Phase 4 — Determinism & test hygiene 🟡 (4.1 `2b71e23`, 4.2 `dd70e00` ✅; 4.3 follow-up)
 
 **Rationale.** One latent flaky test, and tests that break when a comment is reworded.
 Both cost time later.
@@ -269,3 +282,5 @@ Node 18/20/22, and every live checklist item behaves as stated.
 
 - 2026-11-10 — plan written; branch at `78e3922`, 1939 green.
 - 2026-11-10 — Phases 0 + 1 landed (9 commits); 1978 green. Next: Phase 2.
+- 2026-11-26 — Phases 2, 3, 4.1, 4.2 landed (10 commits); 1997 green. Merge gates closed.
+  Next: Phase 6 live checklist (browser + live CC session), release 1.3.0; 4.3 + 5 follow-up.
