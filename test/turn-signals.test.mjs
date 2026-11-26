@@ -78,3 +78,41 @@ test('Claude subagent (sidechain) records never signal the parent session', () =
   ]));
   assert.deepEqual(result, []);
 });
+
+test('Final-question fallback: asks addressed to the human become Input Required', async () => {
+  const { finalTurnSignal } = await import('../hooks/helpers/turn-signals.mjs');
+  const asks = [
+    'Which option would you prefer?',
+    'Should I commit these changes?',
+    'Want me to push?',
+    'Do you want the tests split too?',
+    'Shall I open the PR?',
+    'Ready to merge?',
+    'OK to delete the old fixtures?',
+    'Okay if I rename the helper?',
+    'Can you run the migration locally?',
+    'Done.\n\nWould you like me to also update the docs? Either way the build is green.',
+    'All 40 tests pass.\n\nShould I bump the version? I can do it in a separate commit.',
+    'Please confirm the target branch.',
+  ];
+  for (const text of asks) {
+    assert.equal(finalTurnSignal(text, 'codex', 0).kind, 'input_required', text);
+  }
+});
+
+test('Final-question fallback: statements and rhetorical questions stay turn_complete', async () => {
+  const { finalTurnSignal } = await import('../hooks/helpers/turn-signals.mjs');
+  const done = [
+    'The tests pass.',
+    'What changed? The parser now skips blank lines.',
+    'Why did it fail? The cache was stale; it is fixed now.',
+    'Which option would you prefer?\n\nI went with the first one and the build is green.',
+    'Let me know if anything else comes up.',
+    'Used `a?.b` to guard the lookup.',
+    'See https://example.com/search?q=1 for details.',
+    '',
+  ];
+  for (const text of done) {
+    assert.equal(finalTurnSignal(text, 'codex', 0).kind, 'turn_complete', JSON.stringify(text));
+  }
+});
