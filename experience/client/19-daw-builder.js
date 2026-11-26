@@ -486,7 +486,7 @@
     'read', 'write', 'edit', 'grep_glob',
     'bash_git', 'bash_run', 'bash_other',
     'agent', 'other', 'web', 'tokens', 'words', 'chirp',
-    'human_turn', 'compact', 'permission', 'mode_shift',
+    'human_turn', 'interrupt', 'compact', 'permission', 'mode_shift',
     'attachment', 'scaffold', 'thinking', 'tool_error', 'api_error',
   ];
   const MATCH_HARNESSES = ['claude-code', 'pi', 'antigravity', 'grok', 'opencode', 'copilot'];
@@ -722,7 +722,7 @@
     ['thinking','Thinking'], ['human_turn','User Prompt'], ['chirp','Short Reply'],
     ['compact','Compaction'], ['permission','Permission Mode'], ['mode_shift','Mode Change'],
     ['attachment','Attachment'], ['scaffold','System Message'],
-    ['tool_error','Tool Error'], ['api_error','API Error'],
+    ['tool_error','Tool Error'], ['api_error','API Error'], ['interrupt','Interrupt'],
   ];
 
   function buildSynthTab(body) {
@@ -917,7 +917,7 @@
           turn_complete:'bell', input_required:'pling', thinking:'shaker',
           human_turn:'bell', chirp:'tom', compact:'woodblock',
           permission:'hat', mode_shift:'hat', attachment:'woodblock',
-          scaffold:'hat', tool_error:'buzz', api_error:'buzz',
+          scaffold:'hat', tool_error:'buzz', api_error:'buzz', interrupt:'buzz',
         },
         octaves: {
           read:-2, write:0, edit:-1,
@@ -925,7 +925,7 @@
           grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
           turn_complete:0, input_required:0, thinking:0, human_turn:-1,
           chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
-          scaffold:0, tool_error:0, api_error:0,
+          scaffold:0, tool_error:0, api_error:0, interrupt:-1,
         },
       },
       mappings: [

@@ -1355,3 +1355,25 @@ test('actionLineHtml — turn signals and interrupt render (Phase 1.4)', () => {
 test('actionLineHtml — unknown type falls back to a dot, never throws', () => {
   has(actionLineHtml({ type: 'mystery' }), '<span class="g">·</span>');
 });
+
+test('humanTurnEvent — only typed rows are a human prompt; interrupt has its own event; injected rows are null', async () => {
+  const { humanTurnEvent } = await import('../experience/client-core.mjs');
+  assert.equal(humanTurnEvent({ origin: 'human' }), 'human_turn');
+  assert.equal(humanTurnEvent({ origin: 'command' }), 'human_turn');
+  assert.equal(humanTurnEvent({ origin: 'interrupt' }), 'interrupt');
+  for (const origin of ['tool_result', 'meta', 'notification', 'compact_summary', 'sidechain']) {
+    assert.equal(humanTurnEvent({ origin }), null, origin);
+  }
+  // pulses without origin (older servers): the prompt flag decides
+  assert.equal(humanTurnEvent({}), 'human_turn');
+  assert.equal(humanTurnEvent({ prompt: false }), null);
+});
+
+test('pulseTickerEntry — human_turn lines only for typed prompts; interrupts get their own line', async () => {
+  const { pulseTickerEntry } = await import('../experience/client-core.mjs');
+  assert.equal(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'tool_result' }), null);
+  assert.equal(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'sidechain', text: 'subagent brief' }), null);
+  assert.match(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'command', text: '/review' }).text, /\/review/);
+  const intr = pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'interrupt' });
+  assert.deepEqual(intr, { text: '⎋ interrupted  [abc12345]', role: 'human' });
+});

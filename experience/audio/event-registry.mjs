@@ -269,6 +269,24 @@ export const EVENT_TYPES = {
     },
   },
 
+  // Not a wire event: the audio layer derives it from human_turn.data.origin
+  // (experience/client-core.mjs humanTurnEvent). Placeholder voice (decision D1).
+  interrupt: {
+    family: 'human', instrument: 'buzz', pan: 0.00, sendAmt: 0.05,
+    brightness: 2500, volMult: 0.50, octave: -1,
+    desc: 'User interrupted the agent mid-turn (Esc) — the human taking the ball back',
+    samples: {
+      'claude-code': {
+        version: 1,
+        record: {
+          type: 'user', timestamp: '2026-06-09T10:00:00.000Z',
+          message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+        },
+        expect: [{ kind: 'user_turn', harness: 'claude-code', origin: 'interrupt' }],
+      },
+    },
+  },
+
   attachment: {
     family: 'human', instrument: 'pling', pan: 0.05, sendAmt: 0.02,
     brightness: 8000, volMult: 0.40, octave: 0,

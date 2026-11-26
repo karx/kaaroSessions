@@ -937,9 +937,25 @@ export const LIVE_PLAYPULSE_EVENTS = [
 // ── Cognition pulse vocabulary (ticker / overlays) ────────────────────────────
 
 export const PULSE_GLYPHS = {
-  human_turn: '⌨', compact: '⟲', permission: '⚙', mode_shift: '⚙',
+  human_turn: '⌨', interrupt: '⎋', compact: '⟲', permission: '⚙', mode_shift: '⚙',
   tool_error: '✖', api_error: '⊘', attachment: '⊕', scaffold: '▤',
 };
+
+/**
+ * What a human_turn pulse is to the ticker and the audio: data.origin says who
+ * produced the row. Typed prompts and slash commands are the human; an
+ * interrupt has its own voice; injected rows (tool results, skill bodies,
+ * notifications, compact summaries, subagent prompts) are null — their
+ * tool_result / compact / agent pulses already sound. Same fallback as
+ * surface/active-state.mjs when origin is absent.
+ * @returns {'human_turn'|'interrupt'|null}
+ */
+export function humanTurnEvent(data = {}) {
+  const origin = data.origin ?? (data.prompt === false ? 'tool_result' : 'human');
+  if (origin === 'human' || origin === 'command') return 'human_turn';
+  if (origin === 'interrupt') return 'interrupt';
+  return null;
+}
 
 /**
  * Ticker line for a cognition pulse. Returns { text, role } or null when the
@@ -954,8 +970,12 @@ export function pulseTickerEntry(event, data = {}) {
       return { text: 'Turn complete' + tag, role: 'context' };
     case 'input_required':
       return { text: 'Input required' + tag, role: 'human' };
-    case 'human_turn':
+    case 'human_turn': {
+      const kind = humanTurnEvent(data);
+      if (kind === 'interrupt') return { text: PULSE_GLYPHS.interrupt + ' interrupted' + tag, role: 'human' };
+      if (!kind) return null;
       return { text: g + ' "' + String(data.text || 'prompt').slice(0, 48) + '"' + tag, role: 'human' };
+    }
     case 'compact':
       return { text: g + ' context compacted' + tag, role: 'context' };
     case 'permission':

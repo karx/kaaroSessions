@@ -23,7 +23,7 @@
     { id: 'file',    label: 'File Ops', color: '#2a6a2a', tools: ['read', 'write', 'edit', 'grep_glob'] },
     { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other', 'compact', 'permission', 'scaffold', 'tool_error', 'api_error'] },
     { id: 'ai',      label: 'AI',       color: '#6a2a7a', tools: ['agent', 'other', 'web'] },
-    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required', 'human_turn', 'chirp', 'mode_shift', 'attachment'] },
+    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required', 'human_turn', 'interrupt', 'chirp', 'mode_shift', 'attachment'] },
   ];
 
   const TOOL_FAMILY = {};
@@ -40,7 +40,7 @@
       grep_glob: 'snare', agent: 'bell', other: 'kick',
       web: 'bell', tokens: 'snare', words: 'hat',
       tool_error: 'buzz', api_error: 'buzz',
-      human_turn: 'bell', compact: 'woodblock',
+      human_turn: 'bell', interrupt: 'buzz', compact: 'woodblock',
       permission: 'hat', mode_shift: 'hat',
       chirp: 'tom', attachment: 'woodblock', scaffold: 'hat',
       thinking: 'shaker',
@@ -50,7 +50,7 @@
     octaves: {
       read:-2, write:0, edit:-1, bash_git:0, bash_run:1, bash_other:0,
       grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
-      turn_complete:0, input_required:0, thinking:0, human_turn:-1,
+      turn_complete:0, input_required:0, thinking:0, human_turn:-1, interrupt:-1,
       chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
       scaffold:0, tool_error:0, api_error:0,
     },
@@ -164,6 +164,7 @@
     tool_error: { pan: -0.10, sendAmt: 0.05, brightness: 1500  },
     api_error:  { pan:  0.00, sendAmt: 0.10, brightness:  900  },
     human_turn: { pan:  0.30, sendAmt: 0.25, brightness: 6000  },
+    interrupt:  { pan:  0.30, sendAmt: 0.05, brightness: 2500  },
     compact:    { pan:  0.00, sendAmt: 0.30, brightness: 1200  },
     permission: { pan: -0.10, sendAmt: 0.02, brightness: 7000  },
     mode_shift: { pan: -0.10, sendAmt: 0.02, brightness: 7000  },
@@ -188,6 +189,7 @@
     tool_error: { instrument: 'buzz',  octave: -1, volMult: 1.10 },
     api_error:  { instrument: 'buzz',  octave: -2, volMult: 1.40 },
     human_turn: { instrument: 'bell',  octave: -1, volMult: 0.90 },
+    interrupt:  { instrument: 'buzz',  octave: -1, volMult: 0.50 },
     compact:    { instrument: 'kick',  octave: -2, volMult: 1.20 },
     permission: { instrument: 'hat',   octave:  0, volMult: 0.50 },
     mode_shift: { instrument: 'hat',   octave:  0, volMult: 0.50 },
@@ -728,12 +730,15 @@
   // with registry-defined sonic profiles (W-COG surfacing).
   const COGNITION_EVENTS = new Set([
     'turn_complete', 'input_required',
-    'human_turn', 'compact', 'permission', 'mode_shift',
+    'human_turn', 'interrupt', 'compact', 'permission', 'mode_shift',
     'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
     'thinking', 'unknown',
   ]);
 
   window.playPulse = function (event, data) {
+    // Only typed rows are the human; interrupts get their own voice; injected
+    // rows stay silent (their tool_result / compact / agent pulses already sound).
+    if (event === 'human_turn') { event = humanTurnEvent(data); if (!event) return; }
     let ringEv = null;
     let r = null;
 

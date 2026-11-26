@@ -12,10 +12,10 @@ const calmInstruments = {
   grep_glob:'snare', agent:'bell', other:'kick', web:'bell', tokens:'snare', words:'hat',
   turn_complete:'bell', input_required:'pling', thinking:'shaker', human_turn:'bell',
   chirp:'tom', compact:'woodblock', permission:'hat', mode_shift:'hat',
-  attachment:'woodblock', scaffold:'hat', tool_error:'buzz', api_error:'buzz',
+  attachment:'woodblock', scaffold:'hat', tool_error:'buzz', api_error:'buzz', interrupt:'buzz',
 };
 const calmOctaves = Object.fromEntries(Object.keys(calmInstruments).map(key =>
-  [key, ({ read:-2, edit:-1, bash_run:1, agent:-1, human_turn:-1 })[key] ?? 0]));
+  [key, ({ read:-2, edit:-1, bash_run:1, agent:-1, human_turn:-1, interrupt:-1 })[key] ?? 0]));
 
 test('Fresh visits start with the screenshot Calm Groove settings', () => {
   for (const raw of [null, '{invalid']) {
@@ -90,7 +90,7 @@ test('Synth preview buttons retain click handlers after the entire tab is built'
   const { render, previews } = synthHarness();
   const body = render();
   const buttons = body.descendants().filter(el => el.className === 'btn inst-prev');
-  assert.equal(buttons.length, 24);
+  assert.equal(buttons.length, 25);
   assert.equal(typeof buttons[0].onclick, 'function');
   buttons[0].onclick();
   assert.deepEqual(previews, ['harp']);
@@ -252,7 +252,7 @@ test('Every Graph sound has a Synth row, including thinking, errors, and short r
   const { render } = synthHarness();
   const labels = render().descendants().filter(el => el.className === 'inst-key').map(el => el.textContent);
   for (const label of ['Web', 'Thinking', 'User Prompt', 'Short Reply', 'Compaction',
-    'Permission Mode', 'Mode Change', 'Attachment', 'System Message', 'Tool Error', 'API Error']) {
+    'Permission Mode', 'Mode Change', 'Attachment', 'System Message', 'Tool Error', 'API Error', 'Interrupt']) {
     assert.ok(labels.includes(label), 'Missing Synth row: ' + label);
   }
 });

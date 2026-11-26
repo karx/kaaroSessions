@@ -10,6 +10,7 @@
 
 import { EVENT_TYPES, toolNameToKey, playableInstrument } from './event-registry.mjs';
 import { normRecordsToPulses } from '../../hooks/pulse-transformer.mjs';
+import { humanTurnEvent } from '../client-core.mjs';
 import { recordsToNormalized as ccNorm }   from '../../hooks/adapters/claude-code.mjs';
 import { recordsToNormalized as piNorm }   from '../../hooks/adapters/pi.mjs';
 import { recordsToNormalized as agNorm }   from '../../hooks/adapters/antigravity.mjs';
@@ -214,12 +215,15 @@ export function simulateSession(records, ctx = {}, settings = DEFAULT_SETTINGS, 
     if (ts !== null && tsFirst === null) tsFirst = ts;
 
     const relMs = (ts !== null && tsFirst !== null) ? ts - tsFirst : 0;
-    const sonic = resolveSonic(pulse.event, pulse.data, settings, profile);
+    // same origin routing as the live engine (14-pulse-audio.js playPulse)
+    const event = pulse.event === 'human_turn' ? humanTurnEvent(pulse.data) : pulse.event;
+    if (!event) { silentCount++; continue; }
+    const sonic = resolveSonic(event, pulse.data, settings, profile);
     if (!sonic) { silentCount++; continue; }
     if (sonic.instrument === 'off') { silentCount++; continue; }
 
     const hz = resolveHz(pulse.data, sonic, projectRoot, seqState);
-    events.push({ relMs, event: pulse.event, data: pulse.data, sonic, hz });
+    events.push({ relMs, event, data: pulse.data, sonic, hz });
   }
 
   const summary = {
@@ -229,6 +233,7 @@ export function simulateSession(records, ctx = {}, settings = DEFAULT_SETTINGS, 
     tokens:      events.filter(e => e.event === 'tokens').length,
     words:       events.filter(e => e.event === 'words').length,
     human_turn:  events.filter(e => e.event === 'human_turn').length,
+    interrupt:   events.filter(e => e.event === 'interrupt').length,
     compact:     events.filter(e => e.event === 'compact').length,
     scaffold:    events.filter(e => e.event === 'scaffold').length,
     permission:  events.filter(e => e.event === 'permission').length,
