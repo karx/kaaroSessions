@@ -1043,10 +1043,12 @@
     },
   ];
 
+  // A preset is a full replace from the defaults, so the result never depends on
+  // the previous preset or on earlier Synth-tab edits.
   function applyPreset(preset) {
     if (window.updateAudioSettings) window.updateAudioSettings({
       ...preset.settings,
-      instruments: { turn_complete: 'bell', input_required: 'pling', ...preset.settings.instruments },
+      instruments: { ...window.AUDIO_DEFAULTS?.instruments, ...preset.settings.instruments },
       octave: preset.settings.octave ?? 0,
       octaves: {
         ...Object.fromEntries(Object.keys(window.AUDIO_SETTINGS?.octaves || {}).map(key => [key, 0])),

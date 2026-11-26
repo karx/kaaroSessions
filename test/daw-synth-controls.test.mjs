@@ -272,3 +272,23 @@ test('Thinking instrument and octave can be changed and restored when the tab is
   assert.equal(restored.children.find(el => el.tagName === 'select').value, 'off');
   assert.equal(restored.children.find(el => el.title === 'Thinking octave').value, '-2');
 });
+
+test('Applying a preset replaces instruments from the defaults — earlier choices do not leak through', () => {
+  const applyIn = (setup) => {
+    const context = vm.createContext({ window: {}, localStorage: { getItem: () => null, setItem() {} },
+      document: { getElementById: () => null } });
+    vm.runInContext(settingsSource, context);
+    context.window.updateAudioProfile = () => {};
+    vm.runInContext(builder.slice(builder.indexOf('  const DAW_PRESETS ='), builder.indexOf('  // ── PROF tab')), context);
+    setup(context);
+    vm.runInContext("applyPreset(DAW_PRESETS.find(p => p.name === 'Cognitive Flow'))", context);
+    return JSON.parse(JSON.stringify(context.window.AUDIO_SETTINGS.instruments));
+  };
+  const fresh = applyIn(() => {});
+  const afterEdits = applyIn(c => {
+    c.window.updateAudioSettings({ instruments: { thinking: 'flute', web: 'off', human_turn: 'kick' } });
+    vm.runInContext("applyPreset(DAW_PRESETS.find(p => p.name === 'Thrash Detector'))", c);
+  });
+  assert.deepEqual(afterEdits, fresh);
+  assert.equal(fresh.thinking, 'shaker');
+});
