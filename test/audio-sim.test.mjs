@@ -802,3 +802,24 @@ test('resolveSonic — api_error pulses resolve to the api_error profile', () =>
   assert.equal(s.key, 'api_error');
   assert.ok(s.volMult >= 1.0, 'api errors must be prominent');
 });
+
+test('simulateSession — human bells equal typed prompts; interrupt has its own voice; injected rows are silent', () => {
+  const ts = '2026-06-09T10:00:00.000Z';
+  const user = (content, extra = {}) => ({ type: 'user', timestamp: ts, message: { content }, ...extra });
+  const records = [
+    user('Run all the tests please'),
+    user('<command-name>/review</command-name>'),
+    user([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]),
+    user('Base directory for this skill: /x', { isMeta: true }),
+    user('<task-notification>done</task-notification>'),
+    user('Summarise the repo', { isSidechain: true }),
+    user('This session is being continued…', { isCompactSummary: true }),
+    user('[Request interrupted by user]'),
+  ];
+  const { events, summary } = simulateSession(records, { harness: 'claude-code' });
+  assert.equal(summary.human_turn, 2);
+  assert.equal(summary.interrupt, 1);
+  const intr = events.find(e => e.event === 'interrupt');
+  assert.equal(intr.sonic.key, 'interrupt');
+  assert.equal(intr.sonic.instrument, 'buzz');
+});

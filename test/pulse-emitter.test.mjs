@@ -186,3 +186,21 @@ test('json read_mode — over-cap file is skipped, not crashed: no pulses, no th
     assert.equal(hub.events.filter(e => e.event !== 'now').length, 0, 'oversized json produced no data pulses');
   });
 });
+
+test('turn signals — startedAt and now are injectable: no wall-clock dependence', () => {
+  withTempDir((dir) => {
+    const fp = join(dir, 's.jsonl');
+    const T0 = Date.parse('2020-01-01T00:00:00Z');
+    const done = (iso, id) => JSON.stringify({ type: 'assistant', timestamp: iso,
+      message: { id, stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] } });
+    writeFileSync(fp, done('2019-12-31T23:59:00Z', 'before-start') + '\n'
+      + done('2020-01-01T00:00:05Z', 'after-start') + '\n', 'utf8');
+    const hub = fakeHub();
+    const activeState = createActiveState();
+    const emitter = createPulseEmitter({ hub, activeState, startedAt: T0, now: () => T0 + 10_000 });
+    emitter.tailAndPulse(fp, CC_CTX);
+    const signals = hub.events.filter(e => e.event === 'turn_complete');
+    assert.equal(signals.length, 1, 'only the signal after startedAt (−1s grace) broadcasts');
+    assert.equal(activeState.sessions.get(CC_CTX.session_id).last_seen, T0 + 10_000);
+  });
+});

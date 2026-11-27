@@ -84,6 +84,7 @@ export const HARNESS_REGISTRY = [
       tokens: true, pulse: true, trace: true,
       context_resets: true, ai_title: true, subagent_count: true, branches: true,
       subagent_tree: true,
+      phase: true,
       size_proxy: 'tokens_work',
     },
     watch: {
@@ -143,6 +144,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: true, pulse: true, trace: true, // tokens are output-only (input/cache are per-request context-window snapshots, not per-turn deltas — see docs/CODEX.md)
       context_resets: false, ai_title: true, subagent_count: false, branches: true,
+      phase: true,
       size_proxy: 'tokens_work',
     },
     watch: {
@@ -176,6 +178,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: true, pulse: true, trace: true,
       context_resets: false, ai_title: false, subagent_count: false, branches: false,
+      phase: true,
       size_proxy: 'tokens_work',
     },
     watch: {
@@ -208,6 +211,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: false, pulse: true, trace: true,
       context_resets: true, ai_title: true, subagent_count: true, branches: false,
+      phase: true,
       size_proxy: 'tool_calls',
     },
 
@@ -263,6 +267,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: false, pulse: true, trace: true,
       context_resets: true, ai_title: true, subagent_count: true, branches: true,
+      phase: true,
       size_proxy: 'tool_calls',
     },
     watch: {
@@ -302,6 +307,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: true, pulse: true, trace: true,
       context_resets: false, ai_title: true, subagent_count: false, branches: false,
+      phase: true,
       size_proxy: 'tokens_work',
     },
     watch: {
@@ -345,6 +351,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: true, pulse: true, trace: true, // tokens are output-only (completionTokens)
       context_resets: false, ai_title: true, subagent_count: false, branches: false,
+      phase: false, // tool_use carries no shell command text — intent would be guessed
       size_proxy: 'tokens_work',
     },
     watch: {
@@ -382,6 +389,7 @@ export const HARNESS_REGISTRY = [
     capabilities: {
       tokens: false, pulse: true, trace: true,
       context_resets: false, ai_title: true, subagent_count: false, branches: true,
+      phase: true,
       size_proxy: 'tool_calls',
     },
     watch: {

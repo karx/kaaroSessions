@@ -53,6 +53,47 @@ This is the only event type with dynamic brightness.
 
 ---
 
+## Live controls: Synth tab, instruments, notification melodies
+
+Graph and DAW use the same live sound event list. The DAW Synth tab exposes
+all audible categories, including Thinking, User Prompt, Short Reply, Web,
+Compaction, Permission Mode, Mode Change, Attachment, System Message,
+Tool Error, API Error, and Interrupt. Each row has instrument, octave, and preview controls;
+choose **off** to mute that category. Changes are saved for both views in the
+same browser. Human/context signals appear in the Context lane; structural
+signals and errors appear in System. SIM offers the same event types for testing.
+
+Both views offer rimshot, clap, shaker, tom, and woodblock alongside kick,
+snare, and hi-hat. Marimba adds a softer pitched mallet voice that follows the
+selected scale and octave. These choices are also available in DAW mapping
+rules; adding them does not change existing presets or saved selections.
+
+Calm Groove is the default for fresh visits: random Dorian notes, low bells,
+harp and bass, with shaker for Thinking, tom for Short Reply, and woodblock for
+Compaction and Attachment. Saved choices still take precedence when reopening
+the site. Apply Calm Groove in the DAW's PROF tab to restore the entire preset.
+
+The Synth tab includes **Turn Complete** (low bell) and **Input Required**
+(pling), each with an instrument, octave offset, and preview. Both events
+also appear in the DAW simulator and the graph's live ticker.
+
+Turn Complete plays scale degrees **1, 3, 5, 7** in sequence; Input Required
+plays **7, 5, 3, 1**. Notes are spaced at half-beat intervals using the current
+BPM, scale, and octave settings. On scales with fewer than seven notes,
+degrees continue into the next octave. Preview plays the same phrase.
+Percussion selections play four hits rather than distinct pitches.
+
+User Prompt rings only for rows the person typed (`human_turn.origin` `human` or
+`command`); an Esc/Ctrl-C interrupt plays its own **Interrupt** voice (muted buzz,
+octave −1), and harness-injected rows (tool results, notifications, compaction
+summaries, subagent briefs) are silent. `client-core` `humanTurnEvent()` is the one
+rule, shared by the engine, the ticker and `audio-sim`.
+
+The voice catalogue is `experience/client-core.mjs` `INSTRUMENTS`: every menu, the
+percussion set and the registry's `PLAYABLE_INSTRUMENTS` derive from it.
+
+---
+
 ## Open Design Problems
 
 ### 1. `mode_shift` — chime is correct but pitch is random
@@ -211,6 +252,7 @@ Implementation sites:
 | Add new data from raw records | `hooks/adapters/<harness>.mjs` | `recordsToNormalized()` |
 | Silence specific NR subtypes | `experience/audio/audio-presets.mjs` | per-preset `mappings[]` |
 | New default sonic profile | `experience/audio/event-registry.mjs` | `EVENT_TYPES` entry |
+| Add an instrument | `experience/client-core.mjs` + `experience/client/14-pulse-audio.js` | `INSTRUMENTS` entry + synth function, `INSTS`, `INST_DUR` |
 
 The architecture enforces the boundary: adapters are sonic-unaware. All sonic
 decisions live in `resolveSonic()` and presets. Don't put audio logic in adapters.

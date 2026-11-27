@@ -232,7 +232,8 @@ test('renderKindMapSnippet — one cell per kind×harness, no authored ids requi
   assert.ok(html.includes('user_turn'));
   assert.ok(html.includes('claude-code'));
   assert.ok(html.includes('pi'));
-  assert.equal((html.match(/<td class="k-emit"/g) || []).length, 1);
+  // user_turn row + its `human` origin route (Phase 1.5) — both proved by the golden
+  assert.equal((html.match(/<td class="k-emit"/g) || []).length, 2);
   assert.ok(html.includes('title="golden"'));
   assert.ok(html.includes('data-role='));
   assert.ok(html.includes('k-hit'));
@@ -535,4 +536,25 @@ test('home tile links to /mapping with M shortcut, kept low-key', () => {
     'contrib strip is hidden until revealed, like the tiles');
   assert.ok(/getElementById\('contrib'\)\?\.classList\.add\('on'\)/.test(html),
     'contrib strip is revealed by the same revealChrome() call as the tiles, not on page load');
+});
+
+test('buildKindMapPayload — user_turn origin routes: human expected everywhere, injections n/a unless seen', () => {
+  const payload = buildKindMapPayload({
+    harnesses: HARNESSES,
+    kinds: ['user_turn'],
+    kindPulse: KIND_PULSE,
+    traces: traces({
+      'claude-code': [{ kind: 'user_turn', origin: 'human' }, { kind: 'user_turn', origin: 'sidechain' }],
+      pi: [{ kind: 'user_turn' }],
+    }),
+    toolNameToKey,
+    toolKeys: ['read'],
+  });
+  const row = payload.kinds.find(k => k.id === 'user_turn');
+  const r = id => row.routes.find(x => x.id === id);
+  assert.deepEqual(r('human').expect, [1, 1]);
+  assert.deepEqual(r('human').emit, [1, 1]);
+  assert.deepEqual(r('sidechain').expect, [0, 0]);
+  assert.deepEqual(r('sidechain').emit, [1, 0]);
+  assert.deepEqual(r('interrupt').emit, [0, 0]);
 });

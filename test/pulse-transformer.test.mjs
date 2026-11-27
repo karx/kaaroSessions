@@ -54,6 +54,16 @@ test('tool_use NR → tool_call pulse preserves where from file_path', () => {
   assert.equal(pulse.data.where, 'out/result.mjs');
 });
 
+test('tool_use NR → tool_call pulse carries tool_id (matches input_required.signal_id)', () => {
+  const nrs = [
+    { kind: 'tool_use', harness: 'claude-code', ts: TS, tool: 'AskUserQuestion', tool_id: 'toolu_1', input: {} },
+    { kind: 'tool_use', harness: 'claude-code', ts: TS, tool: 'Read', input: {} },
+  ];
+  const [withId, withoutId] = normRecordsToPulses(nrs, CTX);
+  assert.equal(withId.data.tool_id, 'toolu_1');
+  assert.equal(withoutId.data.tool_id, null);
+});
+
 // ── tokens NR → tokens pulse ─────────────────────────────────────────────────
 
 test('tokens NR → tokens pulse', () => {
@@ -311,4 +321,45 @@ test('every RECORD_KIND maps to a named event; only unknown_record is the catch-
         `${kind}: classified as unknown — add a KIND_PULSE row (silent or sonic)`);
     }
   }
+});
+
+// ── intent / prompt payload (RFC-session-triggers: phase + ripeness) ─────────
+
+test('tool_call pulse carries intent (mutate / verify / read / null)', () => {
+  const mk = (tool, input) => normRecordsToPulses(
+    [{ kind: 'tool_use', harness: 'claude-code', ts: TS, tool, input }], CTX)[0];
+  assert.equal(mk('Edit', { file_path: 'a.mjs' }).data.intent, 'mutate');
+  assert.equal(mk('Bash', { command: 'git commit -m x' }).data.intent, 'mutate');
+  assert.equal(mk('Bash', { command: 'node --test' }).data.intent, 'verify');
+  assert.equal(mk('Read', { file_path: 'a.mjs' }).data.intent, 'read');
+  assert.equal(mk('Bash', {}).data.intent, null);
+  // key stays the canonical sonic key
+  assert.equal(mk('Bash', { command: 'git commit -m x' }).data.key, 'bash_other');
+});
+
+test('human_turn pulse — prompt flag: explicit null display_text is a tool-result row', () => {
+  const mk = nr => normRecordsToPulses([{ kind: 'user_turn', harness: 'x', ts: TS, ...nr }], CTX)[0];
+  assert.equal(mk({ text: null, display_text: 'go' }).data.prompt, true);
+  assert.equal(mk({ text: null, display_text: null }).data.prompt, false);   // CC tool_result-only row
+  assert.equal(mk({ text: 'please build it' }).data.prompt, true);           // adapter without display_text
+  assert.equal(mk({ text: null }).data.prompt, true);                        // short prompt, field absent
+  // prompt text is NOT added to the pulse (text keeps first-message semantics)
+  assert.equal(mk({ text: null, display_text: 'secret plan' }).data.text, null);
+});
+
+test('human_turn pulse carries origin; prompt = origin is human or command (Phase 1.3)', () => {
+  const mk = nr => normRecordsToPulses([{ kind: 'user_turn', harness: 'claude-code', ts: TS, text: null, ...nr }], CTX)[0];
+  for (const o of ['human', 'command']) {
+    const p = mk({ origin: o, display_text: 'x' });
+    assert.equal(p.data.origin, o);
+    assert.equal(p.data.prompt, true, o);
+  }
+  for (const o of ['tool_result', 'interrupt', 'meta', 'notification', 'compact_summary', 'sidechain']) {
+    const p = mk({ origin: o, display_text: 'injected text' });
+    assert.equal(p.data.origin, o);
+    assert.equal(p.data.prompt, false, o + ' is not a prompt even with text');
+  }
+  // harnesses without origin: unchanged display_text rule, origin defaults to human
+  assert.equal(mk({ display_text: 'go' }).data.origin, 'human');
+  assert.equal(mk({ display_text: null }).data.prompt, false);
 });

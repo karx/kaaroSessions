@@ -336,3 +336,27 @@ test('user_turn hybrid text + tool_result still carries display_text', () => {
   assert.ok(ut.display_text.includes('also fix the flaky suite'), 'human text preserved on hybrid row');
   assert.ok(nrs.some(r => r.kind === 'tool_result' && r.tool_id === 'tu1'));
 });
+
+test('user_turn NR carries origin from classifyClaudeUserOrigin (Phase 1.2)', () => {
+  const nrs = recordsToNormalized([
+    { type: 'user', timestamp: 't1', message: { content: 'refactor the emitter please' } },
+    { type: 'user', timestamp: 't2', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }] } },
+    { type: 'user', timestamp: 't3', isSidechain: true, message: { content: 'You are a subagent: read the repo' } },
+    { type: 'user', timestamp: 't4', message: { content: '[Request interrupted by user]' } },
+    { type: 'user', timestamp: 't5', isMeta: true, message: { content: 'Base directory for this skill: C:\s' } },
+  ]);
+  assert.deepEqual(nrs.filter(r => r.kind === 'user_turn').map(r => r.origin),
+    ['human', 'tool_result', 'sidechain', 'interrupt', 'meta']);
+});
+
+test('first user message skips injected rows: only human/command rows qualify', () => {
+  const nrs = recordsToNormalized([
+    { type: 'user', timestamp: 't1', message: { content: '<task-notification> <task-id>abc</task-id> done' } },
+    { type: 'user', timestamp: 't2', message: { content: '[Request interrupted by user]' } },
+    { type: 'user', timestamp: 't3', message: { content: 'build the kind map coverage grid' } },
+  ]);
+  const turns = nrs.filter(r => r.kind === 'user_turn');
+  assert.equal(turns[0].text, null);
+  assert.equal(turns[1].text, null);
+  assert.equal(turns[2].text, 'build the kind map coverage grid');
+});

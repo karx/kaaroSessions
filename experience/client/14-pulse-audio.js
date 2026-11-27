@@ -21,9 +21,9 @@
   // ── Families ──────────────────────────────────────────────────────────────────
   window.AUDIO_FAMILIES = [
     { id: 'file',    label: 'File Ops', color: '#2a6a2a', tools: ['read', 'write', 'edit', 'grep_glob'] },
-    { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other'] },
+    { id: 'system',  label: 'System',   color: '#2a3a7a', tools: ['bash_git', 'bash_run', 'bash_other', 'compact', 'permission', 'scaffold', 'tool_error', 'api_error'] },
     { id: 'ai',      label: 'AI',       color: '#6a2a7a', tools: ['agent', 'other', 'web'] },
-    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking'] },
+    { id: 'context', label: 'Context',  color: '#2a5a6a', tools: ['tokens', 'words', 'thinking', 'turn_complete', 'input_required', 'human_turn', 'interrupt', 'chirp', 'mode_shift', 'attachment'] },
   ];
 
   const TOOL_FAMILY = {};
@@ -34,21 +34,31 @@
   // ── Default settings ──────────────────────────────────────────────────────────
   const DEFAULT_SETTINGS = {
     instruments: {
-      read: 'harp', write: 'bass', edit: 'pling',
-      bash_git: 'snare', bash_run: 'hat', bash_other: 'kick',
-      grep_glob: 'bit', agent: 'bell', other: 'harp',
-      web: 'bell', tokens: 'flute', words: 'bell',
+      turn_complete: 'bell', input_required: 'pling',
+      read: 'hat', write: 'bass', edit: 'pling',
+      bash_git: 'harp', bash_run: 'harp', bash_other: 'hat',
+      grep_glob: 'snare', agent: 'bell', other: 'kick',
+      web: 'bell', tokens: 'snare', words: 'hat',
       tool_error: 'buzz', api_error: 'buzz',
-      human_turn: 'bell', compact: 'kick',
+      human_turn: 'bell', interrupt: 'buzz', compact: 'woodblock',
       permission: 'hat', mode_shift: 'hat',
-      chirp: 'pling', attachment: 'pling', scaffold: 'hat',
-      thinking: 'bell',
+      chirp: 'tom', attachment: 'woodblock', scaffold: 'hat',
+      thinking: 'shaker',
     },
-    scale:       'major_pentatonic',
-    noteMode:    'path_hash',
+    scale:       'dorian',
+    octave:      0,
+    octaves: {
+      read:-2, write:0, edit:-1, bash_git:0, bash_run:1, bash_other:0,
+      grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
+      turn_complete:0, input_required:0, thinking:0, human_turn:-1, interrupt:-1,
+      chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
+      scaffold:0, tool_error:0, api_error:0,
+    },
+    noteMode:    'random',
     bpm:         120,
     beatsPerBar: 4,
     clickTrack:  false,
+    soundEnabled: false,
     clickVol:    0.15,
     filter: { mutedFamilies: [], mutedProjects: [] },
   };
@@ -61,6 +71,7 @@
       return {
         ...DEFAULT_SETTINGS, ...s,
         instruments: { ...DEFAULT_SETTINGS.instruments, ...(s.instruments || {}) },
+        octaves:     { ...DEFAULT_SETTINGS.octaves, ...(s.octaves || {}) },
         filter:      { ...DEFAULT_SETTINGS.filter,      ...(s.filter || {}) },
       };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); }
@@ -103,11 +114,16 @@
 
   window.updateAudioSettings = function (patch) {
     if (patch.instruments) Object.assign(window.AUDIO_SETTINGS.instruments, patch.instruments);
+    if (patch.octaves) Object.assign(window.AUDIO_SETTINGS.octaves, patch.octaves);
     if (patch.filter)      Object.assign(window.AUDIO_SETTINGS.filter, patch.filter);
     const rest = Object.fromEntries(
-      Object.entries(patch).filter(([k]) => k !== 'instruments' && k !== 'filter')
+      Object.entries(patch).filter(([k]) => k !== 'instruments' && k !== 'filter' && k !== 'octaves')
     );
     Object.assign(window.AUDIO_SETTINGS, rest);
+    const profilePatch = Object.fromEntries(
+      ['scale', 'noteMode', 'bpm'].filter(key => key in patch).map(key => [key, patch[key]])
+    );
+    if (Object.keys(profilePatch).length) window.updateAudioProfile(profilePatch);
     try { localStorage.setItem('kaaro-audio-settings', JSON.stringify(window.AUDIO_SETTINGS)); } catch {}
   };
 
@@ -131,6 +147,8 @@
 
   // ── Spatial defaults per action key ──────────────────────────────────────────
   const SPATIAL = {
+    turn_complete: { pan: 0, sendAmt: 0.12, brightness: 3500 },
+    input_required: { pan: 0, sendAmt: 0.10, brightness: 5500 },
     write:      { pan: -0.15, sendAmt: 0.05, brightness: 10000 },
     edit:       { pan: -0.10, sendAmt: 0.05, brightness: 9000  },
     read:       { pan:  0.05, sendAmt: 0.06, brightness: 7000  },
@@ -146,6 +164,7 @@
     tool_error: { pan: -0.10, sendAmt: 0.05, brightness: 1500  },
     api_error:  { pan:  0.00, sendAmt: 0.10, brightness:  900  },
     human_turn: { pan:  0.30, sendAmt: 0.25, brightness: 6000  },
+    interrupt:  { pan:  0.30, sendAmt: 0.05, brightness: 2500  },
     compact:    { pan:  0.00, sendAmt: 0.30, brightness: 1200  },
     permission: { pan: -0.10, sendAmt: 0.02, brightness: 7000  },
     mode_shift: { pan: -0.10, sendAmt: 0.02, brightness: 7000  },
@@ -165,9 +184,12 @@
   // ── Sonic resolution (all axes) ───────────────────────────────────────────────
   // Cognition events: instrument/octave/volume profile (spatial axes in SPATIAL)
   const COG_SOUND = {
+    turn_complete: { instrument: 'bell', octave: -1, volMult: 0.7 },
+    input_required: { instrument: 'pling', octave: 0, volMult: 0.85 },
     tool_error: { instrument: 'buzz',  octave: -1, volMult: 1.10 },
     api_error:  { instrument: 'buzz',  octave: -2, volMult: 1.40 },
     human_turn: { instrument: 'bell',  octave: -1, volMult: 0.90 },
+    interrupt:  { instrument: 'buzz',  octave: -1, volMult: 0.50 },
     compact:    { instrument: 'kick',  octave: -2, volMult: 1.20 },
     permission: { instrument: 'hat',   octave:  0, volMult: 0.50 },
     mode_shift: { instrument: 'hat',   octave:  0, volMult: 0.50 },
@@ -248,18 +270,17 @@
       break;
     }
 
+    octave += Number(S.octaves?.[key]) || 0;
     const tmb = (P.timbre && P.timbre[instrument]) || {};
     const fam = key ? (TOOL_FAMILY[key] || null) : null;
-    if (instrument && instrument !== 'off' && !['harp','bass','bell','flute','bit','pling','snare','kick','hat','buzz'].includes(instrument)) {
-      instrument = ({ pad:'bell', click:'pling', chime:'bell', tick:'hat', woodblock:'pling', sweep:'kick' })[instrument] || 'harp';
-    }
+    if (instrument) instrument = playableInstrument(instrument);
     return { key, instrument, volMult, octave, degreeMode, scale, timbre: tmb, fam, pan, sendAmt, brightness };
   }
 
   window.resolveSonicForEvent = resolveSonic;
 
   // ── AudioContext + master bus ─────────────────────────────────────────────────
-  let _ac = null, muted = true;
+  let _ac = null, muted = !window.AUDIO_SETTINGS.soundEnabled;
   let _masterGain, _masterFilter, _reverbConvolver, _reverbReturn, _masterBusReady = false;
 
   function _setupMasterBus(c) {
@@ -339,7 +360,8 @@
   function noteHz(project, degree, octaveShift) {
     const iv  = activeIv();
     const idx = ((degree % iv.length) + iv.length) % iv.length;
-    return midiToHz(projectRoot(project) + iv[idx] + (octaveShift || 0) * 12);
+    const overall = Number(window.AUDIO_SETTINGS.octave) || 0;
+    return midiToHz(projectRoot(project) + iv[idx] + ((octaveShift || 0) + overall) * 12);
   }
 
   function strHash(s) {
@@ -358,6 +380,19 @@
     return where ? strHash(where) % iv.length : 0;
   }
 
+  function notificationNotes(event, project, octaveShift, scale) {
+    if (event !== 'turn_complete' && event !== 'input_required') return null;
+    const iv = SCALES[scale] || activeIv();
+    const degrees = event === 'turn_complete' ? [0, 2, 4, 6] : [6, 4, 2, 0];
+    const overall = Number(window.AUDIO_SETTINGS.octave) || 0;
+    const root = projectRoot(project) + ((octaveShift || 0) + overall) * 12;
+    const step = 30 / (window.AUDIO_SETTINGS.bpm || 120);
+    return degrees.map((degree, i) => ({
+      hz: midiToHz(root + iv[degree % iv.length] + Math.floor(degree / iv.length) * 12),
+      offset: i * step,
+    }));
+  }
+
   // ── Beat scheduler ────────────────────────────────────────────────────────────
   // 80 ms batch, then snap onto the next beat (musical grid).
   let _beatAt = 0, _barBeat = 0, _batchBuf = [], _batchTimer = null;
@@ -368,11 +403,18 @@
     if (!_batchBuf.length) return;
     const buf = _batchBuf.splice(0);
     const c   = ac(); if (!c) return;
+    // Autoplay-blocked (suspended) clock is frozen: voices queued now would all
+    // fire at once on the first gesture. Drop them; the viz sink already has them.
+    if (c.state !== 'running') return;
     const now = c.currentTime;
+    // Keep alert phrases intact: burst reduction must not drop their notes.
+    const phrases = buf.filter(v => v.notes);
+    const ordinary = buf.filter(v => !v.notes);
     const scale = SCALES[window.AUDIO_SETTINGS?.scale] || SCALES.major_pentatonic;
     const { audible } = (typeof coalesceVoices === 'function')
-      ? coalesceVoices(buf, { scale })
-      : { audible: buf };
+      ? coalesceVoices(ordinary, { scale })
+      : { audible: ordinary };
+    const scheduled = [...audible, ...phrases];
 
     const bd = 60 / (window.AUDIO_SETTINGS.bpm || 120);
     if (_beatAt < now + 0.02) { _beatAt = now + 0.02; _barBeat = 0; }
@@ -380,13 +422,18 @@
     _barBeat = (_barBeat + 1) % (window.AUDIO_SETTINGS.beatsPerBar || 4);
     _beatAt += bd;
 
-    const stagger = Math.min(0.012, 0.04 / Math.max(1, audible.length - 1));
+    const stagger = Math.min(0.012, 0.04 / Math.max(1, scheduled.length - 1));
     // Audio sink only: heardAt is the oscillator clock. The viz sink already
     // owns the ring entry (arrival ts). Do not rewrite ts — that jumps the block.
     for (const v of buf) {
       if (v.meta?.ringEv) v.meta.ringEv.heardAt = at;
     }
-    audible.forEach((v, i) => startVoice(c, at + i * stagger, v));
+    scheduled.forEach((v, i) => {
+      const start = at + i * stagger;
+      if (v.notes) {
+        for (const note of v.notes) startVoice(c, start + note.offset, { ...v, hz: note.hz });
+      } else startVoice(c, start, v);
+    });
   }
 
   // ── Per-voice signal chain ────────────────────────────────────────────────────
@@ -394,10 +441,10 @@
   window._scheduledVoices = [];
   window._getAudioNow = () => (_ac ? _ac.currentTime : 0);
 
-  function schedVoice(name, hz, vol, sonic, meta) {
+  function schedVoice(name, hz, vol, sonic, meta, notes = null) {
     const mixerGain = (window.MIXER_GAINS && sonic.fam) ? (window.MIXER_GAINS[sonic.fam] ?? 1) : 1;
     const finalVol  = (vol != null ? vol : 0.42) * mixerGain;
-    _batchBuf.push({ name, hz, vol: finalVol, sonic, meta });
+    _batchBuf.push({ name, hz, vol: finalVol, sonic, meta, notes });
     if (!ac()) return; // viz already has the pulse; no oscillator to arm
     if (!_batchTimer) _batchTimer = setTimeout(_flushBatch, BATCH_MS);
   }
@@ -417,7 +464,7 @@
       endpoint.connect(sg); sg.connect(_reverbConvolver);
     }
     const fn = INSTS[name] || harp;
-    PERC.has(name) ? fn(c, at, vol, filt) : fn(c, at, hz, vol, filt);
+    PERC_VOICES.has(name) ? fn(c, at, vol, filt) : fn(c, at, hz, vol, filt);
 
     const voices = window._scheduledVoices;
     voices.push({
@@ -535,14 +582,17 @@
   }
 
   function snare(c, at, vol, out) {
-    vol = vol ?? 0.32;
+    vol = (vol ?? 0.32) * 0.75;
     const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.12), c.sampleRate);
     const d   = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     const src = c.createBufferSource(); src.buffer = buf;
-    const f   = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1200;
+    const f   = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 650;
+    const soften = c.createBiquadFilter(); soften.type = 'lowpass'; soften.frequency.value = 3200; soften.Q.value = 0.5;
     const g   = c.createGain();
-    g.gain.setValueAtTime(vol, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
-    src.connect(f); f.connect(g); g.connect(out); src.start(at); src.stop(at + 0.12);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
+    src.connect(f); f.connect(soften); soften.connect(g); g.connect(out); src.start(at); src.stop(at + 0.12);
   }
 
   function kick(c, at, vol, out) {
@@ -578,20 +628,86 @@
     o.connect(g); g.connect(out); o.start(at); o.stop(at + 0.27);
   }
 
-  const INSTS = { harp, bass, bell, flute, bit, pling, snare, kick, hat, buzz };
+  function struckModes(c, at, vol, out, modes) {
+    for (const [hz, weight, duration] of modes) {
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = hz;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(vol * weight, at + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.001, at + duration);
+      o.connect(g); g.connect(out); o.start(at); o.stop(at + duration);
+    }
+  }
+
+  function rimshot(c, at, vol, out) {
+    struckModes(c, at, vol ?? 0.24, out, [[1200, 0.65, 0.045], [1900, 0.35, 0.025]]);
+  }
+
+  function woodblock(c, at, vol, out) {
+    struckModes(c, at, vol ?? 0.28, out, [[750, 0.75, 0.12], [1150, 0.25, 0.06]]);
+  }
+
+  function marimba(c, at, hz, vol, out) {
+    struckModes(c, at, vol ?? 0.32, out, [[hz, 0.85, 0.8], [hz * 2.76, 0.15, 0.18]]);
+  }
+
+  function tom(c, at, vol, out) {
+    const o = c.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(170, at);
+    o.frequency.exponentialRampToValueAtTime(90, at + 0.14);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol ?? 0.4, at + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.001, at + 0.34);
+    o.connect(g); g.connect(out); o.start(at); o.stop(at + 0.34);
+  }
+
+  function filteredNoise(c, at, vol, out, frequency, duration, attack) {
+    const buf = c.createBuffer(1, Math.floor(c.sampleRate * duration), c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource(); src.buffer = buf;
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = frequency; f.Q.value = 0.8;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(vol, at + attack);
+    g.gain.exponentialRampToValueAtTime(0.001, at + duration);
+    src.connect(f); f.connect(g); g.connect(out); src.start(at); src.stop(at + duration);
+  }
+
+  function clap(c, at, vol, out) {
+    // Closely spaced noise bursts produce a handclap without a pitched layer.
+    for (let i = 0; i < 3; i++) {
+      filteredNoise(c, at + i * 0.012, (vol ?? 0.3) * (i === 2 ? 1 : 0.65), out, 1400, i === 2 ? 0.14 : 0.012, 0.002);
+    }
+  }
+
+  function shaker(c, at, vol, out) {
+    filteredNoise(c, at, vol ?? 0.2, out, 4200, 0.085, 0.015);
+  }
+
+  const INSTS = { harp, bass, bell, flute, bit, pling, snare, kick, hat, buzz, rimshot, clap, shaker, tom, woodblock, marimba };
   window.INSTS = INSTS;
-  const PERC  = new Set(['snare', 'kick', 'hat']);
   const INST_DUR = {
     harp: 0.9, bass: 1.4, bell: 2.5, flute: 0.65, bit: 0.22, pling: 0.48,
     snare: 0.12, kick: 0.25, hat: 0.04, buzz: 0.27,
+    rimshot: 0.045, clap: 0.164, shaker: 0.085, tom: 0.34, woodblock: 0.12, marimba: 0.8,
   };
 
-  window.previewInstrument = function (name) {
+  window.previewInstrument = function (name, key) {
     const fn = INSTS[name]; if (!fn) return;
     const c  = ac(); if (!c || !_masterGain) return;
     const at = c.currentTime + 0.05;
     const tmpOut = c.createGain(); tmpOut.gain.value = 1; tmpOut.connect(_masterGain);
-    PERC.has(name) ? fn(c, at, undefined, tmpOut) : fn(c, at, midiToHz(64), undefined, tmpOut);
+    const event = key === 'tokens' || key === 'words' || COG_SOUND[key] ? key : 'tool_call';
+    const sonic = key ? resolveSonic(event, { key }) : null;
+    const octave = sonic?.octave || 0;
+    const notes = notificationNotes(key, null, octave, sonic?.scale)
+      || [{ hz: noteHz(null, 0, octave), offset: 0 }];
+    for (const note of notes) {
+      PERC_VOICES.has(name) ? fn(c, at + note.offset, undefined, tmpOut)
+        : fn(c, at + note.offset, note.hz, undefined, tmpOut);
+    }
   };
 
   // ── Beat ring buffer (shared reference — mutate in place) ─────────────────────
@@ -610,12 +726,16 @@
   // Cognition events ride the same ring + audio path: structural/human signals
   // with registry-defined sonic profiles (W-COG surfacing).
   const COGNITION_EVENTS = new Set([
-    'human_turn', 'compact', 'permission', 'mode_shift',
+    'turn_complete', 'input_required',
+    'human_turn', 'interrupt', 'compact', 'permission', 'mode_shift',
     'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
     'thinking', 'unknown',
   ]);
 
   window.playPulse = function (event, data) {
+    // Only typed rows are the human; interrupts get their own voice; injected
+    // rows stay silent (their tool_result / compact / agent pulses already sound).
+    if (event === 'human_turn') { event = humanTurnEvent(data); if (!event) return; }
     let ringEv = null;
     let r = null;
 
@@ -707,7 +827,8 @@
         if (!passesFilter(r.key, data.project)) return;
         const name = r.instrument; if (name === 'off') return;
         const hz = noteHz(data.project, 0, r.octave || 0);
-        schedVoice(name, hz, 0.12 * r.volMult, r, meta);
+        const notes = notificationNotes(event, data.project, r.octave, r.scale);
+        schedVoice(name, notes?.[0].hz ?? hz, 0.12 * r.volMult, r, meta, notes);
       }
     } catch { /* audio must never break UI */ }
   };
@@ -718,24 +839,39 @@
     btn.id    = 'sound-btn';
     btn.title = 'Toggle pulse sounds';
     btn.style.cssText = 'position:fixed;top:8px;right:110px;background:'+KAARO_TOKENS.card+';color:'+KAARO_TOKENS.dim+';font:bold 10px \'IBM Plex Mono\',monospace;padding:3px 9px;z-index:9998;cursor:pointer;user-select:none;border:1px solid '+KAARO_TOKENS.border+';transition:color .15s,background .15s,border-color .15s;letter-spacing:1px';
-    btn.textContent = '♪ OFF';
     document.body.appendChild(btn);
-    btn.addEventListener('click', () => {
-      muted = !muted;
+    function syncSoundButton() {
+      btn.textContent = muted ? '♪ OFF' : '♪ ON';
+      btn.style.color = muted ? KAARO_TOKENS.dim : '#00ff88';
+      btn.style.background = muted ? KAARO_TOKENS.card : '#061a0e';
+      btn.style.borderColor = muted ? KAARO_TOKENS.border : '#1a4a2a';
+    }
+    function setMuted(value) {
+      muted = !!value;
+      window.updateAudioSettings({ soundEnabled: !muted });
       if (!muted) {
         ac();
         if (window.AUDIO_SETTINGS.clickTrack) _startClick();
-        btn.textContent = '♪ ON';  btn.style.color = '#00ff88'; btn.style.background = '#061a0e'; btn.style.borderColor = '#1a4a2a';
       } else {
         _stopClick();
-        btn.textContent = '♪ OFF'; btn.style.color = KAARO_TOKENS.dim; btn.style.background = KAARO_TOKENS.card; btn.style.borderColor = KAARO_TOKENS.border;
       }
-    });
+      syncSoundButton();
+    }
+    syncSoundButton();
+    btn.addEventListener('click', () => setMuted(!muted));
+    // A saved ON choice still needs a user gesture in browsers that block autoplay.
+    const unlockAudio = () => {
+      if (muted) return;
+      ac();
+      if (window.AUDIO_SETTINGS.clickTrack && !_clickTimer) _startClick();
+    };
+    document.addEventListener('pointerdown', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
     // Expose muted state + toggle for DAW builder's own mute button
     window._getAudioMuted  = () => muted;
     window._setAudioMuted  = (v) => {
       if (v === muted) return;
-      btn.click(); // reuse the logic above
+      setMuted(v);
     };
   }
 

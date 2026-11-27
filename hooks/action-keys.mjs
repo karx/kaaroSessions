@@ -57,3 +57,82 @@ export function toolNameToKey(name, category = null) {
        'web search:', 'fetchwebpage'].includes(t))                            return 'web';
   return 'other';
 }
+
+// ── Intent (RFC-session-triggers §5.1) ───────────────────────────────────────
+// Phase vocabulary that sits BESIDE the Canonical Action Key: does an action
+// mutate, verify, or only read? Keys stay sonic vocabulary and are unchanged;
+// bash_git / bash_run / bash_other each mix all three intents.
+
+export const SHELL_INTENTS = new Set(['mutate', 'verify', 'read']);
+
+const MUTATE_RES = [
+  // global options (-C dir, -c k=v, --no-pager) may precede the subcommand
+  /^git(?:\s+(?:-[Cc]\s+\S+|--\S+))*\s+(commit|push|add|merge|rebase|reset|stash|cherry-pick|tag|rm|mv|apply|am|revert|pull|restore|clean|checkout\s+-b|switch\s+-c|branch\s+-[dDmM])\b/,
+  /^(sed\s+-i|mv|rm|rmdir|mkdir|cp|touch|chmod|chown|ln|tee|patch|unzip)\b/,
+  // tar extract/create: x or c in the mode word (bundled `xzf` or dashed); -t lists
+  /^tar\s+(?:-?[a-z]*[xc]|.*\s-[a-z]*[xc]|.*--(?:extract|create|get)\b)/,
+  /^(npm|pnpm|yarn|bun)\s+(install|i|add|remove|rm|uninstall|ci|update|up)\b/,
+  /^pip3?\s+(install|uninstall)\b/,
+  /^(new-item|remove-item|set-content|add-content|out-file|move-item|copy-item|rename-item)\b/i,
+];
+
+const VERIFY_RES = [
+  /^(npm|pnpm|yarn|bun)\s+(test|t)\b/,
+  /^(npm|pnpm|yarn|bun)\s+run\s+(test|build|lint|check|typecheck)\S*/,
+  /^node\s+--test\b/,
+  /^(pytest|jest|vitest|tsc|mocha|ctest|phpunit|rspec)\b/,
+  /^python3?\s+-m\s+(pytest|unittest)\b/,
+  /^(cargo|go)\s+(test|build|check|vet)\b/,
+  /^make(\s+(test|check|build))?\s*$/,
+  /^npx\s+(tsc|jest|vitest|playwright|mocha|eslint)\b/,
+];
+
+// `> file` / `>> file`, but not `2>…`, `>&…`, `=>` / `->` arrows, or
+// `> /dev/null` / `$null`. Quoted text is blanked before this runs.
+const WRITE_REDIRECT = /(^|[^0-9&>=\-])>>?(?!>)\s*(?!&|\/dev\/null\b|\$null\b|nul\b)\S/i;
+const QUOTED = /"(?:\\.|[^"\\])*"|'[^']*'/g;
+
+// file tools whose canonical key is not write/edit but which still change files
+const MUTATING_TOOLS = new Set(['MultiEdit', 'NotebookEdit']);
+
+const RANK = { read: 0, verify: 1, mutate: 2 };
+
+function segmentIntent(seg) {
+  const c = seg.trim();
+  if (!c) return null;
+  if (MUTATE_RES.some(re => re.test(c)) || WRITE_REDIRECT.test(c)) return 'mutate';
+  if (VERIFY_RES.some(re => re.test(c))) return 'verify';
+  return 'read';
+}
+
+/**
+ * Intent of one shell command. Chains (`&&`, `;`, `|`, `||`) take the
+ * strongest segment (mutate > verify > read). Missing text → null — never
+ * guessed as read, so undercounting stays visible.
+ * @param {string|string[]|null} command
+ * @returns {'mutate'|'verify'|'read'|null}
+ */
+export function shellIntent(command) {
+  const cmd = Array.isArray(command) ? command.join(' ') : command;
+  if (typeof cmd !== 'string' || !cmd.trim()) return null;
+  let best = null;
+  // inline scripts (node -e "…=>…", echo "rm -rf") are arguments, not commands
+  for (const seg of cmd.replace(QUOTED, '""').split(/&&|\|\||;|\|/)) {
+    const i = segmentIntent(seg);
+    if (i && (best === null || RANK[i] > RANK[best])) best = i;
+  }
+  return best ?? 'read';
+}
+
+/**
+ * Intent of one tool invocation: write/edit mutate, shells delegate to
+ * shellIntent(input.command | input.cmd), everything else reads.
+ * @param {string|null} name  — raw harness tool name
+ * @param {object|null} input — raw tool input
+ */
+export function toolIntent(name, input) {
+  if (isBashToolName(name)) return shellIntent(input?.command ?? input?.cmd ?? null);
+  const key = toolNameToKey(name);
+  if (key === 'write' || key === 'edit' || MUTATING_TOOLS.has(name)) return 'mutate';
+  return 'read';
+}

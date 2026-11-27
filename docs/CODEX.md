@@ -50,6 +50,27 @@ latest entry per task id and uses `thread_name` as `session.ai_title`.
 
 ## What Is Extracted
 
+### Turn Notifications
+
+How these signals sound (Synth tab, melodies, presets) is documented in
+[SONIC-MAPPING.md](SONIC-MAPPING.md#live-controls-synth-tab-instruments-notification-melodies).
+
+Codex completion comes from `event_msg/task_complete`, not intermediate text,
+token counts, or duplicate final-message records. Claude Code completion
+comes from assistant `stop_reason: end_turn`.
+
+`request_user_input`, `request_user_input_async`, `AskUserQuestion`, and
+`ExitPlanMode` tool calls generate Input Required. A final reply ending in a
+direct request such as "Which option would you prefer?" is a text-based fallback
+(`reason: final_question`), not a guaranteed native waiting-state signal.
+Commentary and permission-mode changes do not trigger these notifications.
+If the final reply requests input, it emits Input Required instead of also
+emitting Turn Complete. Older transcripts without completion markers cannot
+reliably report completion. Aborted turns do not count as completed turns.
+
+The live emitter deduplicates signals by session, event, and turn/tool identity
+using a bounded cache. Repeated file notifications do not replay the alert.
+
 | Codex raw record | Normalized output | Used by |
 |---|---|---|
 | `session_meta` | `session_meta`, `branch_change` | project labels, model/version/cwd, branch history |

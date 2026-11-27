@@ -705,12 +705,13 @@ export const DAW_FAMILY_LANES = [
   },
   {
     id: 'context', label: 'CONTEXT', bg: '#080c18', portion: 0.15,
-    toolColors: { tokens: '#00ddcc', words: '#00aaff', thinking: '#ffaa00' },
+    toolColors: { tokens: '#00ddcc', words: '#00aaff', thinking: '#ffaa00', turn_complete: '#66cc88', input_required: '#eebb55' },
     blockW: e => e.type === 'tokens' ? 3 : e.type === 'thinking' ? 6 : 8,
     blockH: e => {
       if (e.type === 'tokens')
         return Math.max(0.1, Math.min(0.8, Math.log1p((e.output || 0) / 200) * 0.35));
       if (e.type === 'thinking') return 0.45;
+      if (e.type === 'turn_complete' || e.type === 'input_required') return 0.75;
       return Math.max(0.1, Math.min(0.85, (e.word_count || 0) / 80));
     },
   },
@@ -782,6 +783,7 @@ export const VOICE_MAX_POLYPHONY = 4;
 export const VOICE_MAX_CHORD = 3;
 
 const VOICE_PRIORITY = {
+  turn_complete: 95, input_required: 99,
   tool_error: 100, api_error: 100,
   write: 90, edit: 80,
   words: 70, human_turn: 70, agent: 65,
@@ -790,7 +792,45 @@ const VOICE_PRIORITY = {
   tokens: 12, thinking: 10, unknown: 8, permission: 8,
 };
 
-const PERC_VOICES = new Set(['snare', 'kick', 'hat']);
+// ── Instrument catalogue ──────────────────────────────────────────────────────
+// The one list of voices the live engine synthesises (14-pulse-audio.js INSTS),
+// in menu order. Every instrument menu, the percussion set and the registry's
+// PLAYABLE_INSTRUMENTS derive from it. Adding an instrument = one entry here +
+// its synth function and duration in 14-pulse-audio.js.
+export const INSTRUMENTS = [
+  { id: 'harp',      label: 'Harp' },
+  { id: 'bass',      label: 'Bass' },
+  { id: 'bell',      label: 'Bell' },
+  { id: 'flute',     label: 'Flute' },
+  { id: 'bit',       label: 'Bit' },
+  { id: 'pling',     label: 'Pling' },
+  { id: 'marimba',   label: 'Marimba' },
+  { id: 'snare',     label: 'Snare',     perc: true },
+  { id: 'kick',      label: 'Kick',      perc: true },
+  { id: 'hat',       label: 'Hi-Hat',    perc: true },
+  { id: 'rimshot',   label: 'Rimshot',   perc: true },
+  { id: 'clap',      label: 'Clap',      perc: true },
+  { id: 'shaker',    label: 'Shaker',    perc: true },
+  { id: 'tom',       label: 'Tom',       perc: true },
+  { id: 'woodblock', label: 'Woodblock', perc: true },
+  { id: 'buzz',      label: 'Buzz' },
+];
+
+export const INSTRUMENT_IDS = INSTRUMENTS.map(i => i.id);
+
+/** Unpitched voices: synth signature `(c, at, vol, out)`; bursts collapse to one hit. */
+export const PERC_VOICES = new Set(INSTRUMENTS.filter(i => i.perc).map(i => i.id));
+
+/** Menu choices: every voice, then `off` (mutes the event). */
+export const INSTRUMENT_OPTIONS = [...INSTRUMENTS, { id: 'off', label: '— Off —' }];
+
+/** Registry names that have no synth yet → the voice that stands in for them. */
+export const INSTRUMENT_FALLBACK = { pad: 'bell', click: 'pling', chime: 'bell', tick: 'hat', sweep: 'kick' };
+
+export function playableInstrument(name) {
+  if (name === 'off' || INSTRUMENT_IDS.includes(name)) return name;
+  return INSTRUMENT_FALLBACK[name] || 'harp';
+}
 
 export function voicePriority(v) {
   const key = v?.sonic?.key || v?.key || '';
@@ -921,6 +961,7 @@ export function sessionLegend(ring, max = 6, windowTokens = 200_000) {
 // Cognition events share one loop. unknown / silent / tool_result stay wire-only.
 
 export const LIVE_COGNITION_EVENTS = [
+  'turn_complete', 'input_required',
   'human_turn', 'compact', 'permission', 'mode_shift',
   'tool_error', 'api_error', 'chirp', 'attachment', 'scaffold',
   'thinking',
@@ -934,9 +975,25 @@ export const LIVE_PLAYPULSE_EVENTS = [
 // ── Cognition pulse vocabulary (ticker / overlays) ────────────────────────────
 
 export const PULSE_GLYPHS = {
-  human_turn: '⌨', compact: '⟲', permission: '⚙', mode_shift: '⚙',
+  human_turn: '⌨', interrupt: '⎋', compact: '⟲', permission: '⚙', mode_shift: '⚙',
   tool_error: '✖', api_error: '⊘', attachment: '⊕', scaffold: '▤',
 };
+
+/**
+ * What a human_turn pulse is to the ticker and the audio: data.origin says who
+ * produced the row. Typed prompts and slash commands are the human; an
+ * interrupt has its own voice; injected rows (tool results, skill bodies,
+ * notifications, compact summaries, subagent prompts) are null — their
+ * tool_result / compact / agent pulses already sound. Same fallback as
+ * surface/active-state.mjs when origin is absent.
+ * @returns {'human_turn'|'interrupt'|null}
+ */
+export function humanTurnEvent(data = {}) {
+  const origin = data.origin ?? (data.prompt === false ? 'tool_result' : 'human');
+  if (origin === 'human' || origin === 'command') return 'human_turn';
+  if (origin === 'interrupt') return 'interrupt';
+  return null;
+}
 
 /**
  * Ticker line for a cognition pulse. Returns { text, role } or null when the
@@ -947,8 +1004,16 @@ export function pulseTickerEntry(event, data = {}) {
   const g = PULSE_GLYPHS[event];
   const tag = data.slug ? '  [' + data.slug + ']' : '';
   switch (event) {
-    case 'human_turn':
+    case 'turn_complete':
+      return { text: 'Turn complete' + tag, role: 'context' };
+    case 'input_required':
+      return { text: 'Input required' + tag, role: 'human' };
+    case 'human_turn': {
+      const kind = humanTurnEvent(data);
+      if (kind === 'interrupt') return { text: PULSE_GLYPHS.interrupt + ' interrupted' + tag, role: 'human' };
+      if (!kind) return null;
       return { text: g + ' "' + String(data.text || 'prompt').slice(0, 48) + '"' + tag, role: 'human' };
+    }
     case 'compact':
       return { text: g + ' context compacted' + tag, role: 'context' };
     case 'permission':
@@ -1628,4 +1693,116 @@ export async function shareCard(svgString, title = 'kaaroSessions', text = '', f
   }
   await downloadCard(svgString, filename);
   return 'downloaded';
+}
+
+// ── /now action feed (one recent_actions entry → one line) ────────────────────
+
+export const ACT_GLYPH = {
+  tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
+  permission: '⚙', mode_shift: '⚙', api_error: '⊘',
+  input_required: '?', turn_complete: '◆', interrupt: '⏹',
+};
+
+export function actionLineHtml(a) {
+  const g = ACT_GLYPH[a.type] || '·';
+  let body = '';
+  if (a.type === 'tool_call') {
+    const where = a.where ? String(a.where).replace(/\\/g, '/').split('/').pop() : (a.why || '');
+    body = '<span class="t">' + esc(a.tool || '?') + '</span> ' + esc(String(where).slice(0, 44));
+  } else if (a.type === 'tool_error') {
+    body = '<span class="t">' + esc(a.tool || '?') + '</span> failed';
+  } else if (a.type === 'api_error') {
+    body = esc((a.message || 'api error') + (a.code ? ' [' + a.code + ']' : ''));
+  } else if (a.type === 'human_turn') {
+    body = esc(String(a.text || 'prompt').slice(0, 48));
+  } else if (a.type === 'permission' || a.type === 'mode_shift') {
+    body = a.type.replace('_', ' ') + ' → <span class="t">' + esc(a.mode || '?') + '</span>';
+  } else if (a.type === 'compact') {
+    body = 'context compacted';
+  } else if (a.type === 'input_required') {
+    body = 'awaiting input' + (a.reason ? ' · ' + esc(String(a.reason).replace(/_/g, ' ')) : '');
+  } else if (a.type === 'turn_complete') {
+    body = 'turn complete';
+  } else if (a.type === 'interrupt') {
+    body = 'interrupted by you';
+  }
+  return '<div class="act' + (a.error ? ' err' : '') + '"><span class="g">' + g + '</span>' + body + '</div>';
+}
+
+// ── Session vitals (/now: phase · ripeness · health) ─────────────────────────
+// Renders the surface's explainable states (surface/session-vitals.mjs via
+// /api/active). Classes only — page CSS maps them to --k-* tokens.
+
+export const VITAL_CLASS = {
+  phase:    { think: 'v-think', do: 'v-do', verify: 'v-verify' },
+  ripeness: { fresh: 'v-dim', ripening: 'v-body', ripe: 'v-ok', overripe: 'v-warn', stalled: 'v-bad' },
+  health:   { ok: 'v-ok', strained: 'v-warn', degraded: 'v-bad', unknown: 'v-dim' },
+  verdict:  { ok: 'v-ok', info: 'v-dim', warn: 'v-warn', bad: 'v-bad', na: 'v-na' },
+};
+
+export const VERDICT_GLYPH = { ok: '✓', info: '·', warn: '!', bad: '✖', na: '–' };
+
+export function vitalsLineHtml(s, caps = {}) {
+  if (!s || (!s.health && s.phase === undefined)) return '';
+  const bits = [];
+  // Ball in the human's court leads the line: a request is a warn, a plain
+  // finished turn is ok (not an alarm).
+  const aw = s.awaiting;
+  if (aw) {
+    const ask = aw.event === 'input_required';
+    bits.push('<span class="' + (ask ? 'v-warn' : 'v-ok') + '">◆ ' +
+      (ask ? 'AWAITING INPUT' : 'YOUR TURN') + '</span>' +
+      (aw.seconds != null ? ' <b>' + fmtAgo(aw.seconds) + '</b>' : ''));
+  }
+  if (caps.phase === false) {
+    bits.push('PHASE <span class="v-dim">—</span>');
+  } else {
+    const ph = s.phase;
+    bits.push('PHASE ' + (ph
+      ? '<span class="' + VITAL_CLASS.phase[ph] + '">' + ph.toUpperCase() + '</span>' +
+        (s.time_in_phase_s != null ? ' <b>' + fmtAgo(s.time_in_phase_s) + '</b>' : '')
+      : '<span class="v-dim">—</span>'));
+    const r = s.ripeness && s.ripeness.state;
+    if (r) bits.push('<span class="' + VITAL_CLASS.ripeness[r] + '">' + r.toUpperCase() + '</span>');
+    if (s.lead_in && s.lead_in.turns) {
+      bits.push('lead-in <b>' + s.lead_in.turns + 't · ' + s.lead_in.tool_calls + ' tools</b>');
+    }
+  }
+  if (s.health && s.health.state) {
+    bits.push('HEALTH <span class="' + VITAL_CLASS.health[s.health.state] + '">' +
+      s.health.state.toUpperCase() + '</span>');
+  }
+  return '<div class="vitals">' + bits.join(' · ') + '</div>';
+}
+
+function vitalValue(row) {
+  if (row.value == null) return '—';
+  let v = typeof row.value === 'boolean' ? (row.value ? 'yes' : 'no') : String(row.value);
+  if (row.id === 'pause_s' || row.id === 'idle_s') v = fmtAgo(row.value);
+  if (row.est_rewrite_tokens) v += ' · ≈' + fmtTok(row.est_rewrite_tokens) + ' rewrite';
+  return v;
+}
+
+function vitalRows(inputs) {
+  return (inputs || []).map(i =>
+    '<div class="vrow"><span class="' + VITAL_CLASS.verdict[i.verdict] + '">' +
+      (VERDICT_GLYPH[i.verdict] || '·') + '</span> ' +
+      '<span class="vk">' + esc(String(i.id).replace(/_/g, ' ')) + '</span>' +
+      '<span class="vv">' + esc(vitalValue(i)) + '</span>' +
+      '<span class="vn">' + esc(i.note || '') + '</span></div>').join('');
+}
+
+export function vitalsDetailHtml(s, caps = {}) {
+  let html = '';
+  const r = s && s.ripeness;
+  if (caps.phase !== false && r && r.state) {
+    html += '<div class="d-hd">◆ RIPENESS <span class="' + VITAL_CLASS.ripeness[r.state] + '">' +
+      r.state.toUpperCase() + '</span></div>' + vitalRows(r.inputs);
+  }
+  const h = s && s.health;
+  if (h && h.state) {
+    html += '<div class="d-hd">◆ HEALTH <span class="' + VITAL_CLASS.health[h.state] + '">' +
+      h.state.toUpperCase() + '</span></div>' + vitalRows(h.inputs);
+  }
+  return html ? '<div class="vitals-detail">' + html + '</div>' : '';
 }

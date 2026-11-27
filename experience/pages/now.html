@@ -73,6 +73,23 @@
   .card .toolline .where { color: var(--k-dim); }
   .card .modes { margin-top: 3px; font-size: 9px; letter-spacing: 0.06em; color: var(--k-dim); }
   .card .modes .mode { color: var(--k-select); }
+  /* Session vitals — phase · ripeness · health (surface/session-vitals.mjs) */
+  .card .vitals { margin-top: 3px; font-size: 10px; letter-spacing: 0.06em; color: var(--k-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vitals b { color: var(--k-data); font-weight: 400; }
+  .v-think  { color: var(--k-select); }
+  .v-do     { color: var(--k-accent); }
+  .v-verify { color: var(--k-geo); }
+  .v-ok     { color: var(--k-geo); }
+  .v-warn   { color: var(--k-label); }
+  .v-bad    { color: var(--k-err); }
+  .v-body   { color: var(--k-body); }
+  .v-dim, .v-na { color: var(--k-dim); }
+  .vitals-detail { margin-bottom: 5px; }
+  .vitals-detail .d-hd { margin-top: 3px; }
+  .vrow { display: flex; gap: 8px; font-size: 10px; white-space: nowrap; }
+  .vrow .vk { width: 104px; color: var(--k-body); }
+  .vrow .vv { width: 150px; color: var(--k-data); overflow: hidden; text-overflow: ellipsis; }
+  .vrow .vn { color: var(--k-dim); overflow: hidden; text-overflow: ellipsis; }
   .card .apierr { margin-top: 3px; font-size: 10px; color: var(--k-err); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .preview { color: var(--k-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: italic; }
   .card .metrics { display: flex; gap: 12px; margin-top: 5px; font-size: 10px; color: var(--k-dim); }
@@ -172,30 +189,7 @@
   }
 
   // ── Action history (recent_actions ring from /api/active) ─────────────
-  const ACT_GLYPH = {
-    tool_call: '▸', tool_error: '✖', compact: '⟲', human_turn: '⌨',
-    permission: '⚙', mode_shift: '⚙', api_error: '⊘',
-  };
-
-  function actLine(a) {
-    const g = ACT_GLYPH[a.type] || '·';
-    let body = '';
-    if (a.type === 'tool_call') {
-      const where = a.where ? String(a.where).replace(/\\/g, '/').split('/').pop() : (a.why || '');
-      body = '<span class="t">' + esc(a.tool || '?') + '</span> ' + esc(String(where).slice(0, 44));
-    } else if (a.type === 'tool_error') {
-      body = '<span class="t">' + esc(a.tool || '?') + '</span> failed';
-    } else if (a.type === 'api_error') {
-      body = esc((a.message || 'api error') + (a.code ? ' [' + a.code + ']' : ''));
-    } else if (a.type === 'human_turn') {
-      body = esc(String(a.text || 'prompt').slice(0, 48));
-    } else if (a.type === 'permission' || a.type === 'mode_shift') {
-      body = a.type.replace('_', ' ') + ' → <span class="t">' + esc(a.mode || '?') + '</span>';
-    } else if (a.type === 'compact') {
-      body = 'context compacted';
-    }
-    return '<div class="act' + (a.error ? ' err' : '') + '"><span class="g">' + g + '</span>' + body + '</div>';
-  }
+  // actionLineHtml + ACT_GLYPH live in experience/client-core.mjs (tested there).
 
   // ── Compact context-window strip (on-demand /api/trace) ───────────────
   function ctxStrip(sessionId, harness) {
@@ -255,6 +249,7 @@
       const m = meta[s.session_id] || {};
       const title = m.ai_title || s.last_preview || '';
       const isOpen = expanded.has(s.session_id);
+      const caps = harnessInfo[s.harness]?.capabilities || {};
       const modeBits = [];
       if (s.last_mode)            modeBits.push('mode <span class="mode">' + esc(s.last_mode) + '</span>');
       if (s.last_permission_mode) modeBits.push('perm <span class="mode">' + esc(s.last_permission_mode) + '</span>');
@@ -268,6 +263,7 @@
         '</div>' +
         (title ? '<div class="titleline">' + esc(String(title).slice(0, 80)) + '</div>' : '') +
         lastTool(s) +
+        vitalsLineHtml(s, caps) +
         (modeBits.length ? '<div class="modes">' + modeBits.join(' · ') + '</div>' : '') +
         (s.last_api_error ? '<div class="apierr">⊘ ' + esc(s.last_api_error.message || 'api error') +
           (s.last_api_error.code ? ' [' + esc(s.last_api_error.code) + ']' : '') + '</div>' : '') +
@@ -283,8 +279,9 @@
         '</div>' +
         (isOpen ?
           '<div class="detail">' +
+            vitalsDetailHtml(s, caps) +
             '<div class="d-hd">◆ RECENT ACTIONS</div>' +
-            '<div class="actions">' + (s.recent_actions || []).map(actLine).join('') + '</div>' +
+            '<div class="actions">' + (s.recent_actions || []).map(actionLineHtml).join('') + '</div>' +
             '<div class="d-hd" style="margin-top:5px">◆ CONTEXT WINDOWS</div>' +
             ctxStrip(s.session_id, s.harness) +
           '</div>' : '') +

@@ -5,6 +5,8 @@
  */
 
 import { extractTextFromContent, extractSkills, categorizeBash } from '../helpers/analyze-helpers.mjs';
+import { finalTurnSignal, inputToolSignal } from '../helpers/turn-signals.mjs';
+import { classifyClaudeUserOrigin } from '../helpers/user-origin.mjs';
 
 const HARNESS = 'claude-code';
 
@@ -104,12 +106,11 @@ export function recordsToNormalized(records) {
     if (rec.type === 'user' && rec.message) {
       handled = true;
       const text = extractTextFromContent(rec.message.content);
+      const origin = classifyClaudeUserOrigin(rec);
       let userText = null;
-      if (!firstUserSeen) {
+      if (!firstUserSeen && (origin === 'human' || origin === 'command')) {
         const stripped = stripFirstUserMessage(text);
-        if (stripped.length >= 8
-            && !stripped.startsWith('Base directory for this skill')
-            && !stripped.startsWith('Caveat:')) {
+        if (stripped.length >= 8) {
           userText = stripped;
           firstUserSeen = true;
         }
@@ -123,7 +124,7 @@ export function recordsToNormalized(records) {
 
       out.push({
         kind: 'user_turn', harness: HARNESS, ts, text: userText,
-        display_text: displayText,
+        display_text: displayText, origin,
         version: rec.version, entrypoint: rec.entrypoint,
         cwd: rec.cwd, branch: rec.gitBranch,
       });
@@ -185,6 +186,8 @@ export function recordsToNormalized(records) {
         out.push(cbNR);
         if (bt === 'tool_use') {
           const name = block.name || 'unknown';
+          const signal = rec.isSidechain ? null : inputToolSignal(name, block.id, HARNESS, ts);
+          if (signal) out.push(signal);
           const isBash = ['bash', 'powershell', 'shell', 'run_command'].includes(name.toLowerCase());
           const category = isBash ? categorizeBash(block.input?.command) : null;
           out.push({
@@ -195,6 +198,13 @@ export function recordsToNormalized(records) {
           });
         }
       }
+    }
+
+    // Subagent transcripts tail into the parent session — a sidechain finishing
+    // (or asking) is not the main turn ending, so it must not ring the parent.
+    if (rec.type === 'assistant' && !rec.isSidechain && rec.message?.stop_reason === 'end_turn') {
+      const text = extractTextFromContent(rec.message.content);
+      out.push(finalTurnSignal(text, HARNESS, ts, rec.message.id || rec.uuid));
     }
 
     if (!handled) {

@@ -194,6 +194,12 @@ Grounding (verified 2026-07-20):
 test it); snapshot log payload size (30+ sessions ≈ MBs — acceptable per RFC "full
 shape preferred"; gzip noted as future work).
 
+## Item 11 — Merge readiness: fork DAW audio + session vitals 🟡 IN PROGRESS (Phases 0–3, 4.1/4.2, 5 ✅ — merge gates closed; 4.3 open)
+
+Phase-wise plan with rationale, direction and end hypotheses:
+[`PLAN-merge-fork-daw-audio.md`](PLAN-merge-fork-daw-audio.md). Branch
+`kaaro/merge/fork-daw-audio`. Phases 0–3 + 4.1/4.2 gate the merge; 4.3 + 5 follow-up.
+
 ---
 
 ## Status log

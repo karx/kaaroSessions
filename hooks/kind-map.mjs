@@ -152,7 +152,7 @@ export function buildKindMapPayload({
         pulse: rs.pulse,
         reason: rs.reason || null,
         role: rs.role,
-        expect: harnesses.map(() => (rs.role === 'alarm' ? 0 : 1)),
+        expect: harnesses.map(() => (rs.role === 'alarm' || rs.expect === 'none' ? 0 : 1)),
         emit: rProof.map(p => (p.length ? 1 : 0)),
         proof: rProof,
       };

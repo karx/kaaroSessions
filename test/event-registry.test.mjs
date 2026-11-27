@@ -62,7 +62,7 @@ test('playableInstrument — maps aspirational names; passes through playable', 
   assert.equal(playableInstrument('click'), 'pling');
   assert.equal(playableInstrument('chime'), 'bell');
   assert.equal(playableInstrument('tick'), 'hat');
-  assert.equal(playableInstrument('woodblock'), 'pling');
+  assert.equal(playableInstrument('woodblock'), 'woodblock');
   assert.equal(playableInstrument('sweep'), 'kick');
   assert.equal(playableInstrument('harp'), 'harp');
   assert.equal(playableInstrument('off'), 'off');
@@ -226,4 +226,9 @@ test('toolNameToKey — unknown returns other', () => {
   assert.equal(toolNameToKey('UnknownTool'), 'other');
   assert.equal(toolNameToKey(''),            'other');
   assert.equal(toolNameToKey(null),          'other');
+});
+
+test('PLAYABLE_INSTRUMENTS — derived from the client-core catalogue plus off', async () => {
+  const { INSTRUMENT_IDS } = await import('../experience/client-core.mjs');
+  assert.deepEqual([...PLAYABLE_INSTRUMENTS].sort(), [...INSTRUMENT_IDS, 'off'].sort());
 });

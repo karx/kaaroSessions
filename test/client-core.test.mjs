@@ -26,6 +26,7 @@ import {
   GLYPH_GRAPH_R, glyphGraphConfig, glyphGraphPins, graphRectToMinimap,
   NODE_RADII,
   projectGlyphMarkup, projectGlyphSvg, projectGlyphFieldSvg,
+  vitalsLineHtml, vitalsDetailHtml, VITAL_CLASS, actionLineHtml,
 } from '../experience/client-core.mjs';
 
 test('fmtTok — M/k/plain formatting', () => {
@@ -1242,4 +1243,156 @@ test('generateUsageShareCardSVG — constellation: one hex per project over one 
   const overflowSvg = generateUsageShareCardSVG(buildUsageShareCardData(meGlyph([]), { projects: manyProjects, sessions: manySessions }));
   assert.ok(overflowSvg.includes('+5 projects'), '65 projects, 60-cap → 5 overflow');
   assert.ok(overflowSvg.includes('+5 sessions'), '205 sessions, 200-cap → 5 overflow');
+});
+
+// ── Session vitals (/now phase · ripeness · health) ──────────────────────────
+
+function vs(over = {}) {
+  return {
+    phase: 'think', time_in_phase_s: 134,
+    lead_in: { turns: 1, tool_calls: 6 },
+    ripeness: { state: 'ripe', inputs: [
+      { id: 'lead_in_turns', value: 1, verdict: 'ok', note: '1–3 thinking turns' },
+      { id: 'cache', value: 'cold', verdict: 'warn', note: 'idle 400s', est_rewrite_tokens: 214_000 },
+    ] },
+    health: { state: 'strained', inputs: [
+      { id: 'compacts', value: 2, verdict: 'warn', note: 'context compactions this session' },
+      { id: 'cache_hit', value: null, verdict: 'na', note: 'no cache counters' },
+    ] },
+    ...over,
+  };
+}
+
+test('VITAL_CLASS — every state maps to a class (color is grammar, CSS owns hues)', () => {
+  for (const p of ['think', 'do', 'verify']) assert.ok(VITAL_CLASS.phase[p]);
+  for (const r of ['fresh', 'ripening', 'ripe', 'overripe', 'stalled']) assert.ok(VITAL_CLASS.ripeness[r]);
+  for (const h of ['ok', 'strained', 'degraded', 'unknown']) assert.ok(VITAL_CLASS.health[h]);
+});
+
+test('vitalsLineHtml — phase, time in phase, ripeness, lead-in, health', () => {
+  const h = vitalsLineHtml(vs(), { phase: true });
+  assert.match(h, /class="vitals"/);
+  assert.match(h, /THINK/);
+  assert.match(h, /2m14s/);
+  assert.match(h, /RIPE\b/);
+  assert.match(h, /1t · 6 tools/);
+  assert.match(h, /STRAINED/);
+  assert.match(h, new RegExp(VITAL_CLASS.phase.think));
+});
+
+test('vitalsLineHtml — no ripeness while doing', () => {
+  const h = vitalsLineHtml(vs({ phase: 'do', ripeness: { state: null, inputs: [] } }), { phase: true });
+  assert.match(h, /DO/);
+  assert.doesNotMatch(h, /RIPE/);
+});
+
+test('vitalsLineHtml — capability off: PHASE — and no guessed ripeness; health stays', () => {
+  const h = vitalsLineHtml(vs(), { phase: false });
+  assert.match(h, /PHASE <span class="v-dim">—<\/span>/);
+  assert.doesNotMatch(h, /RIPE/);
+  assert.match(h, /STRAINED/);
+});
+
+test('vitalsLineHtml — old snapshot without vitals renders nothing', () => {
+  assert.equal(vitalsLineHtml({}, {}), '');
+});
+
+test('vitalsDetailHtml — lists every input row with verdict glyph, value, note', () => {
+  const h = vitalsDetailHtml(vs(), { phase: true });
+  assert.match(h, /◆ RIPENESS/);
+  assert.match(h, /◆ HEALTH/);
+  assert.match(h, /lead in turns/);
+  assert.match(h, /cold · ≈214k rewrite/);
+  assert.match(h, /cache hit/);
+  assert.match(h, /v-warn/);
+  assert.match(h, /v-na/);
+});
+
+test('vitalsDetailHtml — escapes values and notes', () => {
+  const s = vs({ health: { state: 'ok', inputs: [{ id: 'api_error', value: '<x>', verdict: 'bad', note: 'a<b' }] } });
+  const h = vitalsDetailHtml(s, { phase: true });
+  assert.ok(!h.includes('<x>'));
+  assert.match(h, /&lt;x&gt;/);
+});
+
+test('vitalsLineHtml — awaiting input leads the line (warn), with how long', () => {
+  const h = vitalsLineHtml(vs({ awaiting: { event: 'input_required', reason: 'approval', seconds: 75 } }), { phase: true });
+  assert.match(h, /^<div class="vitals"><span class="v-warn">◆ AWAITING INPUT<\/span> <b>1m15s<\/b> · PHASE/);
+});
+
+test('vitalsLineHtml — finished turn shows YOUR TURN (ok), not an alarm', () => {
+  const h = vitalsLineHtml(vs({ awaiting: { event: 'turn_complete', reason: 'end_turn', seconds: 4 } }), { phase: true });
+  assert.match(h, /<span class="v-ok">◆ YOUR TURN<\/span> <b>4s<\/b>/);
+  assert.doesNotMatch(h, /AWAITING/);
+});
+
+test('vitalsLineHtml — no awaiting chip when awaiting is null', () => {
+  assert.doesNotMatch(vitalsLineHtml(vs({ awaiting: null }), { phase: true }), /AWAITING|YOUR TURN/);
+});
+
+// ── /now action feed (moved from now.html: actLine) ──────────────────────────
+
+const has = (html, part) => assert.ok(html.includes(part), JSON.stringify(part) + ' in ' + html);
+
+test('actionLineHtml — tool call shows tool + file basename (any slash)', () => {
+  has(actionLineHtml({ type: 'tool_call', tool: 'Edit', where: 'D:\\src\\a\\b.mjs' }),
+    '<span class="g">▸</span><span class="t">Edit</span> b.mjs');
+});
+
+test('actionLineHtml — errors get the err class; text is escaped', () => {
+  const err = actionLineHtml({ type: 'tool_error', tool: 'Bash', error: true });
+  has(err, 'class="act err"');
+  has(err, 'Bash</span> failed');
+  has(actionLineHtml({ type: 'human_turn', text: '<b>hi</b>' }), '&lt;b&gt;hi');
+});
+
+test('actionLineHtml — turn signals and interrupt render (Phase 1.4)', () => {
+  has(actionLineHtml({ type: 'input_required', reason: 'question_tool' }), '?</span>awaiting input · question tool');
+  has(actionLineHtml({ type: 'turn_complete' }), '◆</span>turn complete');
+  has(actionLineHtml({ type: 'interrupt' }), '⏹</span>interrupted by you');
+});
+
+test('actionLineHtml — unknown type falls back to a dot, never throws', () => {
+  has(actionLineHtml({ type: 'mystery' }), '<span class="g">·</span>');
+});
+
+test('humanTurnEvent — only typed rows are a human prompt; interrupt has its own event; injected rows are null', async () => {
+  const { humanTurnEvent } = await import('../experience/client-core.mjs');
+  assert.equal(humanTurnEvent({ origin: 'human' }), 'human_turn');
+  assert.equal(humanTurnEvent({ origin: 'command' }), 'human_turn');
+  assert.equal(humanTurnEvent({ origin: 'interrupt' }), 'interrupt');
+  for (const origin of ['tool_result', 'meta', 'notification', 'compact_summary', 'sidechain']) {
+    assert.equal(humanTurnEvent({ origin }), null, origin);
+  }
+  // pulses without origin (older servers): the prompt flag decides
+  assert.equal(humanTurnEvent({}), 'human_turn');
+  assert.equal(humanTurnEvent({ prompt: false }), null);
+});
+
+test('pulseTickerEntry — human_turn lines only for typed prompts; interrupts get their own line', async () => {
+  const { pulseTickerEntry } = await import('../experience/client-core.mjs');
+  assert.equal(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'tool_result' }), null);
+  assert.equal(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'sidechain', text: 'subagent brief' }), null);
+  assert.match(pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'command', text: '/review' }).text, /\/review/);
+  const intr = pulseTickerEntry('human_turn', { slug: 'abc12345', origin: 'interrupt' });
+  assert.deepEqual(intr, { text: '⎋ interrupted  [abc12345]', role: 'human' });
+});
+
+test('instrument catalogue — unique ids, labels, percussion subset, menu ends with off', async () => {
+  const { INSTRUMENTS, INSTRUMENT_IDS, INSTRUMENT_OPTIONS, PERC_VOICES } = await import('../experience/client-core.mjs');
+  assert.equal(new Set(INSTRUMENT_IDS).size, INSTRUMENTS.length, 'ids are unique');
+  assert.ok(INSTRUMENTS.every(i => typeof i.label === 'string' && i.label), 'every voice has a label');
+  assert.ok(!INSTRUMENT_IDS.includes('off'), 'off is a menu choice, not a voice');
+  assert.deepEqual(INSTRUMENT_OPTIONS.map(o => o.id), [...INSTRUMENT_IDS, 'off']);
+  assert.deepEqual([...PERC_VOICES].sort(),
+    ['clap', 'hat', 'kick', 'rimshot', 'shaker', 'snare', 'tom', 'woodblock']);
+});
+
+test('playableInstrument — catalogue voices and off pass through; stand-ins, then harp', async () => {
+  const { playableInstrument, INSTRUMENT_IDS } = await import('../experience/client-core.mjs');
+  for (const id of [...INSTRUMENT_IDS, 'off']) assert.equal(playableInstrument(id), id);
+  assert.deepEqual(['pad', 'click', 'chime', 'tick', 'sweep'].map(playableInstrument),
+    ['bell', 'pling', 'bell', 'hat', 'kick']);
+  assert.equal(playableInstrument('theremin'), 'harp');
+  assert.equal(playableInstrument(''), 'harp');
 });

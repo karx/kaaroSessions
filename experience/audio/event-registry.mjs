@@ -10,7 +10,8 @@
  *
  * Adding a new event type: add one entry here. All presets must then add
  * a mapping rule (enforced by audio-sim.test.mjs preset validation).
- * instrument must be a Playable Instrument or 'off'.
+ * instrument must be a Playable Instrument or 'off' (the voice catalogue
+ * lives in experience/client-core.mjs INSTRUMENTS — the browser shares it).
  *
  * `silent` is a rest: known NR, no live sonic. `unknown` is the alarm.
  *
@@ -19,6 +20,7 @@
  */
 
 export { toolNameToKey, TOOL_ACTION_KEYS } from '../../hooks/action-keys.mjs';
+import { INSTRUMENT_IDS, INSTRUMENT_FALLBACK, playableInstrument } from '../client-core.mjs';
 
 // ── Families ──────────────────────────────────────────────────────────────────
 export const FAMILIES = new Set(['file', 'system', 'ai', 'context', 'human', 'meta']);
@@ -39,6 +41,22 @@ export const FAMILIES = new Set(['file', 'system', 'ai', 'context', 'human', 'me
  * }
  */
 export const EVENT_TYPES = {
+  turn_complete: {
+    family: 'context', instrument: 'bell', pan: 0, sendAmt: 0.12,
+    brightness: 3500, volMult: 0.7, octave: -1,
+    desc: 'Assistant finished its turn',
+    samples: { codex: { version: 1,
+      record: { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'done', last_agent_message: 'Finished.' } },
+      expect: [{ kind: 'turn_complete', harness: 'codex' }] } },
+  },
+  input_required: {
+    family: 'context', instrument: 'pling', pan: 0, sendAmt: 0.1,
+    brightness: 5500, volMult: 0.85, octave: 0,
+    desc: 'Assistant requested an answer or approval; final-question detection is a fallback',
+    samples: { 'claude-code': { version: 1,
+      record: { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'ask', input: {} }] } },
+      expect: [{ kind: 'input_required', harness: 'claude-code' }] } },
+  },
 
   // ── Tool-action sub-keys (carried on tool_call pulses via data.key) ──────
 
@@ -253,6 +271,24 @@ export const EVENT_TYPES = {
     },
   },
 
+  // Not a wire event: the audio layer derives it from human_turn.data.origin
+  // (experience/client-core.mjs humanTurnEvent). Placeholder voice (decision D1).
+  interrupt: {
+    family: 'human', instrument: 'buzz', pan: 0.00, sendAmt: 0.05,
+    brightness: 2500, volMult: 0.50, octave: -1,
+    desc: 'User interrupted the agent mid-turn (Esc) — the human taking the ball back',
+    samples: {
+      'claude-code': {
+        version: 1,
+        record: {
+          type: 'user', timestamp: '2026-06-09T10:00:00.000Z',
+          message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+        },
+        expect: [{ kind: 'user_turn', harness: 'claude-code', origin: 'interrupt' }],
+      },
+    },
+  },
+
   attachment: {
     family: 'human', instrument: 'pling', pan: 0.05, sendAmt: 0.02,
     brightness: 8000, volMult: 0.40, octave: 0,
@@ -356,20 +392,10 @@ export const EVENT_TYPES = {
 
 export const EVENT_TYPE_KEYS = new Set(Object.keys(EVENT_TYPES));
 
-/** Voices `14-pulse-audio.js` INSTS actually implements, plus `off`. */
-export const PLAYABLE_INSTRUMENTS = new Set([
-  'harp', 'bass', 'bell', 'flute', 'bit', 'pling',
-  'snare', 'kick', 'hat', 'buzz', 'off',
-]);
+/** Voices the live engine implements (client-core catalogue), plus `off`. */
+export const PLAYABLE_INSTRUMENTS = new Set([...INSTRUMENT_IDS, 'off']);
 
 /** Aspirational registry names → playable stand-ins until those synths exist. */
-export const PLAYABLE_FALLBACK = {
-  pad: 'bell', click: 'pling', chime: 'bell',
-  tick: 'hat', woodblock: 'pling', sweep: 'kick',
-};
+export const PLAYABLE_FALLBACK = INSTRUMENT_FALLBACK;
 
-export function playableInstrument(name) {
-  if (!name) return 'harp';
-  if (PLAYABLE_INSTRUMENTS.has(name)) return name;
-  return PLAYABLE_FALLBACK[name] || 'harp';
-}
+export { playableInstrument };

@@ -1,4 +1,4 @@
-import { toolNameToKey } from './action-keys.mjs';
+import { toolNameToKey, toolIntent } from './action-keys.mjs';
 import { pulseDisposition } from './pulse-map.mjs';
 
 /**
@@ -57,6 +57,9 @@ function transformRecord(nr, ctx, capabilities) {
   }
 
   switch (disp.event) {
+    case 'turn_complete':
+    case 'input_required':
+      return { event: disp.event, data: { ...env, signal_id: nr.signal_id, reason: nr.reason } };
 
     case 'tool_call': {
       const key   = toolNameToKey(nr.tool, nr.category);
@@ -64,7 +67,8 @@ function transformRecord(nr, ctx, capabilities) {
       const why   = nr.input?.command || nr.input?.description || null;
       return {
         event: 'tool_call',
-        data: { ...env, tool: nr.tool, key, where, why, category: key },
+        data: { ...env, tool: nr.tool, tool_id: nr.tool_id ?? null, key,
+          intent: toolIntent(nr.tool, nr.input), where, why, category: key },
       };
     }
 
@@ -119,9 +123,14 @@ function transformRecord(nr, ctx, capabilities) {
     }
 
     case 'human_turn': {
+      // origin (user_turn NR) says who produced the row; only the person
+      // typing (human / command) is a prompt. Adapters without origin: an
+      // explicitly null display_text marks a tool-result row, else human.
+      const origin = nr.origin ?? (nr.display_text === null ? 'tool_result' : 'human');
       return {
         event: 'human_turn',
-        data: { ...env, text: nr.text || null },
+        data: { ...env, text: nr.text || null, origin,
+          prompt: origin === 'human' || origin === 'command' },
       };
     }
 

@@ -24,10 +24,16 @@ import { MAX_JSONL_BYTES } from '../hooks/jsonl-io.mjs';
  * @param {number} [deps.nowThrottleMs] — trailing-edge `now` broadcast window
  * @param {number} [deps.maxBytes] — shared OOM-guard cap for tail/whole-file
  *   reads (default MAX_JSONL_BYTES) + test seam
+ * @param {number} [deps.startedAt] — epoch ms the server started; turn signals
+ *   stamped more than 1 s earlier are history, not live (default Date.now())
+ * @param {() => number} [deps.now] — clock for pulses and snapshots (default Date.now)
  * @returns {{ tailAndPulse: (filePath: string, ctx: object) => void }}
  */
-export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrottleMs = 1000, maxBytes = MAX_JSONL_BYTES }) {
+export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrottleMs = 1000,
+  maxBytes = MAX_JSONL_BYTES, startedAt = Date.now(), now = Date.now }) {
   const offsetMap = new Map(); // filePath → byte offset (jsonl) or size:mtime sig (json)
+  const seenSignals = new Map();
+  const signalStart = startedAt - 1000;
   let nowTimer = null;
 
   // Throttle: at most one `now` broadcast per window, trailing-edge,
@@ -36,7 +42,7 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     if (nowTimer) return;
     nowTimer = setTimeout(() => {
       nowTimer = null;
-      hub.notify('now', JSON.stringify(snapshotActive(activeState, Date.now())));
+      hub.notify('now', JSON.stringify(snapshotActive(activeState, now())));
     }, nowThrottleMs);
     nowTimer.unref?.();
   }
@@ -45,8 +51,19 @@ export function createPulseEmitter({ hub, activeState, kindMap = null, nowThrott
     const harness = getHarness(ctx.harness);
     if (!harness) return;
     const nrs   = harness.adapter(records);
-    const nowMs = Date.now();
+    const nowMs = now();
     for (const pulse of normRecordsToPulses(nrs, ctx, harness.capabilities)) {
+      if (pulse.event === 'turn_complete' || pulse.event === 'input_required') {
+        const signalTime = typeof pulse.data.ts === 'number' ? pulse.data.ts : Date.parse(pulse.data.ts);
+        if (Number.isFinite(signalTime) && signalTime < signalStart) continue;
+        const id = pulse.data.signal_id || pulse.data.ts;
+        if (id != null) {
+          const key = JSON.stringify([ctx.harness, ctx.session_id, pulse.event, id]);
+          if (seenSignals.has(key)) continue;
+          seenSignals.set(key, true);
+          if (seenSignals.size > 4096) seenSignals.delete(seenSignals.keys().next().value);
+        }
+      }
       applyPulse(activeState, pulse, nowMs);
       kindMap?.applyPulse(pulse);
       hub.notify(pulse.event, JSON.stringify(pulse.data));

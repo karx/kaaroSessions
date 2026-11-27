@@ -21,13 +21,13 @@ export const AUDIO_PRESETS = {
         grep_glob:'bit', agent:'bell', other:'harp', web:'bell',
         // cognitive / stream
         tokens:'flute', words:'bell', chirp:'pling',
-        human_turn:'bell', attachment:'pling', mode_shift:'bell',
+        human_turn:'bell', interrupt:'buzz', attachment:'pling', mode_shift:'bell',
         thinking:'bell',
         // structural
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -55,6 +55,7 @@ export const AUDIO_PRESETS = {
       { match: { key:'chirp'      }, set: { volMult:0.25, pan: 0.15, send:0.01, brightness: 7000 } },
       // Human turn: centered pad — grounds the session, equal weight L/R (human intent is neutral axis)
       { match: { key:'human_turn' }, set: { volMult:0.65, pan: 0.00, send:0.08, brightness: 7000 } },
+      { match: { key:'interrupt'  }, set: { volMult:0.50, pan: 0.00, send:0.05, brightness: 2500 } },
       // Attachment: quiet click, slight right — context loading is passive, signals preparation
       { match: { key:'attachment' }, set: { volMult:0.35, pan: 0.05, send:0.02, brightness: 8000 } },
       // Mode shift: centered chime with reverb — plan mode toggle is a rare, significant mode change
@@ -75,6 +76,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'tool_result'}, set: { volMult:0.35, pan: 0.05, send:0.03, brightness: 5000 } },
       // Unknown: minimal tick — diagnostic signal, not music; low vol to stay audible without cluttering
       { match: { key:'unknown'    }, set: { volMult:0.20, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },
@@ -92,13 +95,13 @@ export const AUDIO_PRESETS = {
         grep_glob:'bit', agent:'bell', other:'bit', web:'bell',
         // cognitive / stream
         tokens:'flute', words:'bell', chirp:'pling',
-        human_turn:'bell', attachment:'pling', mode_shift:'bell',
+        human_turn:'bell', interrupt:'buzz', attachment:'pling', mode_shift:'bell',
         thinking:'bell',
         // structural
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -124,6 +127,7 @@ export const AUDIO_PRESETS = {
       { match: { key:'words'      }, set: { volMult:0.75, pan: 0.20, send:0.12, brightness: 8000, octave: 1 } },
       { match: { key:'chirp'      }, set: { volMult:0.20, pan: 0.15, send:0.01, brightness: 7000 } },
       { match: { key:'human_turn' }, set: { volMult:0.60, pan: 0.00, send:0.08, brightness: 7000 } },
+      { match: { key:'interrupt'  }, set: { volMult:0.50, pan: 0.00, send:0.05, brightness: 2500 } },
       { match: { key:'attachment' }, set: { volMult:0.30, pan: 0.05, send:0.02, brightness: 8000 } },
       { match: { key:'mode_shift' }, set: { volMult:0.40, pan: 0.00, send:0.10, brightness: 6000 } },
       { match: { key:'thinking'   }, set: { volMult:0.25, pan:-0.10, send:0.06, brightness: 4000, octave:-1 } },
@@ -138,6 +142,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'api_error'  }, set: { volMult:1.50, pan: 0.00, send:0.12, brightness:  800, octave:-2 } },
       { match: { key:'tool_result'}, set: { volMult:0.40, pan: 0.05, send:0.03, brightness: 5000 } },
       { match: { key:'unknown'    }, set: { volMult:0.20, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },
@@ -155,13 +161,13 @@ export const AUDIO_PRESETS = {
         grep_glob:'bit', agent:'bell', other:'harp', web:'bell',
         // cognitive / stream
         tokens:'bass', words:'bell', chirp:'pling',
-        human_turn:'bell', attachment:'pling', mode_shift:'bell',
+        human_turn:'bell', interrupt:'buzz', attachment:'pling', mode_shift:'bell',
         thinking:'bell',
         // structural
         compact:'kick', permission:'hat', scaffold:'pling',
         tool_error:'buzz', tool_result:'harp', api_error:'buzz',
         // rest + catch-all
-        silent:'off', unknown:'hat',
+        silent:'off', unknown:'hat', turn_complete:'bell', input_required:'pling',
       },
     },
     mappings: [
@@ -188,6 +194,7 @@ export const AUDIO_PRESETS = {
       { match: { key:'chirp'      }, set: { instrument:'off', volMult:0.00, pan: 0.00, send:0.00, brightness: 1 } },
       // Human turn louder (0.90 vs CF 0.65): macro layer — user prompts shape session arc, need presence
       { match: { key:'human_turn' }, set: { volMult:0.90, pan: 0.00, send:0.10, brightness: 7500 } },
+      { match: { key:'interrupt'  }, set: { volMult:0.50, pan: 0.00, send:0.05, brightness: 2500 } },
       { match: { key:'attachment' }, set: { volMult:0.30, pan: 0.05, send:0.02, brightness: 8000 } },
       { match: { key:'mode_shift' }, set: { volMult:0.40, pan: 0.00, send:0.10, brightness: 6000 } },
       // Thinking slightly dimmer in session-arc (0.20 vs CF 0.25) — deliberation is a background texture
@@ -200,6 +207,8 @@ export const AUDIO_PRESETS = {
       { match: { key:'api_error'  }, set: { volMult:1.30, pan: 0.00, send:0.10, brightness:  900, octave:-2 } },
       { match: { key:'tool_result'}, set: { volMult:0.35, pan: 0.05, send:0.03, brightness: 5000 } },
       { match: { key:'unknown'    }, set: { volMult:0.15, pan: 0.00, send:0.00, brightness: 3000 } },
+      { match: { key:'turn_complete' }, set: { volMult:0.7 } },
+      { match: { key:'input_required' }, set: { volMult:0.85 } },
       { match: { key:'silent'     }, set: { instrument:'off', volMult:0.00 } },
     ],
   },

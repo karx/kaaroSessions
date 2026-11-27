@@ -8,7 +8,34 @@
  * Pure module: no I/O, no Date.now() — the caller supplies `now` (epoch ms).
  * State is a plain object with a Map, mutated in place (server-side store,
  * same convention as the beat ring).
+ *
+ * Phase / lead-in (RFC-session-triggers): a *round* is one human prompt plus
+ * the agent work that follows it (human_turn with prompt !== false opens a new
+ * round). A round's phase is do > verify > think from tool_call.data.intent.
+ * Ripeness + Health are computed per snapshot in surface/session-vitals.mjs.
  */
+
+import { assessRipeness, assessHealth } from './session-vitals.mjs';
+
+const AGENT_EVENTS = new Set(['tool_call', 'tool_error', 'tool_result', 'tokens', 'words', 'chirp', 'thinking']);
+// Pulses that end an awaiting state: the human answered/prompted, or the agent
+// resumed. tokens are excluded (usage rides the same batch as the signal), and
+// so is the asking tool's own tool_call — matched by id (input_required.signal_id
+// = tool_call.tool_id), so the surface never needs harness tool names.
+// human_turn is handled by origin (injected rows must not clear it).
+const RESUME_EVENTS = new Set(['tool_result', 'tool_error', 'words', 'chirp', 'thinking', 'compact', 'tool_call']);
+// human_turn origins that hand the ball back: typed, interrupted, or answered.
+const ORIGIN_RESUMES = new Set(['human', 'command', 'interrupt', 'tool_result']);
+const PLAN_REF = /(^|\/)(RFC-[^/]*|[^/]*PLAN[^/]*|EXECUTION\.md)$|\/plans?\//i;
+
+function newRound() { return { tools: 0, do: 0, verify: 0, activity: 0 }; }
+
+function roundPhase(r) {
+  if (r.do > 0) return 'do';
+  if (r.verify > 0) return 'verify';
+  if (r.activity > 0) return 'think';
+  return null;
+}
 
 export const DEFAULT_THRESHOLDS = {
   activeMs: 2 * 60_000,   // pulse within 2 min  → active
@@ -46,6 +73,25 @@ function getEntry(state, data, now) {
       last_mode: null,
       api_errors: 0,
       last_api_error: null,
+      // seq: per-session pulse counter. Pulses of one tail batch share `now`;
+      // vitals use (ts, seq) to tell which came first.
+      seq: 0,
+      last_agent_seq: null,
+      last_tool_seq: null,
+      last_api_error_seq: null,
+      // phase / lead-in / vitals inputs
+      round: newRound(),
+      phase: null,
+      phase_since: null,
+      lead_in_closed: 0,        // closed thinking rounds since the last do/verify round
+      lead_in_tool_calls: 0,
+      lead_in_plan_ref: false,
+      last_prompt_at: null,
+      last_agent_at: null,
+      last_tool_at: null,
+      has_cache: false,
+      last_context: null,
+      awaiting: null,           // { event, reason, since } — ball is in the human's court
     };
     state.sessions.set(data.session_id, e);
   }
@@ -74,9 +120,21 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
   const e = getEntry(state, data, now);
   e.last_seen = now;
   e.last_event = event;
+  e.seq++;
   if (!e.project && data.project) e.project = data.project; // backfill (opencode part pulses lack it)
+  if (AGENT_EVENTS.has(event)) { e.last_agent_at = now; e.last_agent_seq = e.seq; e.round.activity++; }
+
+  const isAskingCall = event === 'tool_call' && data.tool_id != null
+    && data.tool_id === e.awaiting?.signal_id;
+  if (e.awaiting && RESUME_EVENTS.has(event) && !isAskingCall) e.awaiting = null;
 
   switch (event) {
+    case 'turn_complete':
+    case 'input_required':
+      e.awaiting = { event, reason: data.reason ?? null, signal_id: data.signal_id ?? null, since: now };
+      pushAction(e, { type: event, ts: now, reason: data.reason ?? null });
+      break;
+
     case 'tool_call':
       e.tool_calls++;
       e.last_tool = {
@@ -88,6 +146,16 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       };
       pushAction(e, { type: 'tool_call', ts: now, tool: data.tool ?? null,
         key: data.key ?? null, where: data.where ?? null, why: data.why ?? null });
+      e.last_tool_at = now;
+      e.last_tool_seq = e.seq;
+      e.round.tools++;
+      if (data.intent === 'mutate') e.round.do++;
+      else if (data.intent === 'verify') e.round.verify++;
+      else {
+        e.lead_in_tool_calls++;
+        if (data.where && PLAN_REF.test(String(data.where).replace(/\\/g, '/'))) e.lead_in_plan_ref = true;
+      }
+      if (e.round.do || e.round.verify) { e.lead_in_tool_calls = 0; e.lead_in_plan_ref = false; }
       break;
 
     case 'tool_error':
@@ -100,6 +168,11 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       e.tokens.output       += data.output       || 0;
       e.tokens.cache_create += data.cache_create || 0;
       e.tokens.cache_read   += data.cache_read   || 0;
+      if (!data.synthetic) {
+        if ((data.cache_read || 0) > 0 || (data.cache_create || 0) > 0) e.has_cache = true;
+        const ctx = (data.input || 0) + (data.cache_read || 0) + (data.cache_create || 0);
+        if (ctx > 0) e.last_context = ctx;
+      }
       const work = (data.output || 0) + (data.cache_create || 0);
       if (work > 0) e.recent_work.push({ t: now, work });
       pruneRecentWork(e, now, thresholds.burnWindowMs);
@@ -112,11 +185,23 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
       if (data.preview) e.last_preview = data.preview;
       break;
 
-    case 'human_turn':
-      e.human_turns++;
-      e.last_human_ts = now;
-      pushAction(e, { type: 'human_turn', ts: now, text: data.text ?? null });
+    case 'human_turn': {
+      // origin (pulse-transformer) says who produced the row. Only the person
+      // typing opens a round; injected rows (subagent prompts, skill bodies,
+      // notifications, compact summaries) leave the parent's round alone.
+      const origin = data.origin ?? (data.prompt === false ? 'tool_result' : 'human');
+      if (ORIGIN_RESUMES.has(origin)) e.awaiting = null;
+      if (origin === 'interrupt') {
+        pushAction(e, { type: 'interrupt', ts: now });
+      } else if (data.prompt !== false && (origin === 'human' || origin === 'command')) {
+        closeRound(e);
+        e.last_prompt_at = now;
+        e.human_turns++;
+        e.last_human_ts = now;
+        pushAction(e, { type: 'human_turn', ts: now, text: data.text ?? null });
+      }
       break;
+    }
 
     case 'compact':
       e.compacts++;
@@ -136,6 +221,7 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
     case 'api_error':
       e.api_errors++;
       e.last_api_error = { message: data.message ?? null, code: data.code ?? null, ts: now };
+      e.last_api_error_seq = e.seq;
       pushAction(e, { type: 'api_error', ts: now, error: true,
         message: data.message ?? null, code: data.code ?? null });
       break;
@@ -143,6 +229,22 @@ export function applyPulse(state, pulse, now, thresholds = DEFAULT_THRESHOLDS) {
     default:
       break; // last_seen/last_event already bumped — that is the signal
   }
+
+  const p = roundPhase(e.round);
+  if (p && p !== e.phase) { e.phase = p; e.phase_since = now; }
+}
+
+function closeRound(e) {
+  const p = roundPhase(e.round);
+  if (p === 'think') e.lead_in_closed++;
+  else if (p === 'do' || p === 'verify') e.lead_in_closed = 0;
+  e.round = newRound();
+}
+
+function leadInTurns(e) {
+  const p = roundPhase(e.round);
+  if (p === 'do' || p === 'verify') return 0;
+  return e.lead_in_closed + (p === 'think' ? 1 : 0);
 }
 
 function pruneRecentWork(e, now, windowMs) {
@@ -202,6 +304,34 @@ export function snapshotActive(state, now, overrides = {}) {
       last_mode: e.last_mode,
       api_errors: e.api_errors,
       last_api_error: e.last_api_error,
+      phase: e.phase,
+      time_in_phase_s: e.phase_since == null ? null : Math.round((now - e.phase_since) / 1000),
+      lead_in: { turns: leadInTurns(e), tool_calls: e.lead_in_tool_calls },
+      awaiting: e.awaiting && { event: e.awaiting.event, reason: e.awaiting.reason,
+        seconds: Math.round((now - e.awaiting.since) / 1000) },
+      ripeness: assessRipeness({
+        phase: e.phase,
+        lead_in_turns: leadInTurns(e),
+        last_prompt_at: e.last_prompt_at,
+        last_agent_at: e.last_agent_at,
+        last_seen: e.last_seen,
+        plan_ref: e.lead_in_plan_ref,
+        has_cache: e.has_cache,
+        last_context: e.last_context,
+        last_api_error_at: e.last_api_error?.ts ?? null,
+        last_agent_seq: e.last_agent_seq,
+        last_api_error_seq: e.last_api_error_seq,
+      }, now),
+      health: assessHealth({
+        recent_actions: e.recent_actions,
+        compacts: e.compacts,
+        tokens: e.tokens,
+        has_cache: e.has_cache,
+        last_api_error: e.last_api_error,
+        last_tool_at: e.last_tool_at,
+        last_api_error_seq: e.last_api_error_seq,
+        last_tool_seq: e.last_tool_seq,
+      }),
     });
 
     const h = by_harness[e.harness] ??= { sessions: 0, active: 0, tool_calls: 0, tokens_work: 0 };

@@ -482,14 +482,14 @@
   // ── MAP tab ───────────────────────────────────────────────────────────────────
   const MATCH_FAMILIES = ['file', 'system', 'ai', 'context'];
   const MATCH_KEYS = [
+    'turn_complete', 'input_required',
     'read', 'write', 'edit', 'grep_glob',
     'bash_git', 'bash_run', 'bash_other',
     'agent', 'other', 'web', 'tokens', 'words', 'chirp',
-    'human_turn', 'compact', 'permission', 'mode_shift',
+    'human_turn', 'interrupt', 'compact', 'permission', 'mode_shift',
     'attachment', 'scaffold', 'thinking', 'tool_error', 'api_error',
   ];
   const MATCH_HARNESSES = ['claude-code', 'pi', 'antigravity', 'grok', 'opencode', 'copilot'];
-  const INST_NAMES = ['harp', 'bass', 'bell', 'flute', 'bit', 'pling', 'snare', 'kick', 'hat', 'buzz', 'off'];
   const DEGREE_MODES = ['path_hash', 'sequential', 'random', 'root'];
 
   function buildMapTab(body) {
@@ -623,7 +623,7 @@
     };
 
     const instSel = document.createElement('select'); instSel.className = 'inp inst-sel';
-    instSel.innerHTML = '<option value="">— keep —</option>' + INST_NAMES.map(n => `<option value="${n}"${(r.set.instrument===n)?' selected':''}>${n}</option>`).join('');
+    instSel.innerHTML = '<option value="">— keep —</option>' + INSTRUMENT_OPTIONS.map(({ id: n }) => `<option value="${n}"${(r.set.instrument===n)?' selected':''}>${n}</option>`).join('');
     formDiv.appendChild(mkRow('instrument', instSel));
 
     const makeNumInp = (cls, ph, val) => {
@@ -715,32 +715,75 @@
     ['read','Read'], ['write','Write'], ['edit','Edit'],
     ['bash_git','Bash (git)'], ['bash_run','Bash (run)'], ['bash_other','Bash (other)'],
     ['grep_glob','Grep/Glob'], ['agent','Agent'], ['other','Other'],
+    ['web','Web'],
     ['tokens','Tokens'], ['words','Words'],
+    ['turn_complete','Turn Complete'], ['input_required','Input Required'],
+    ['thinking','Thinking'], ['human_turn','User Prompt'], ['chirp','Short Reply'],
+    ['compact','Compaction'], ['permission','Permission Mode'], ['mode_shift','Mode Change'],
+    ['attachment','Attachment'], ['scaffold','System Message'],
+    ['tool_error','Tool Error'], ['api_error','API Error'], ['interrupt','Interrupt'],
   ];
 
   function buildSynthTab(body) {
     const S2 = window.AUDIO_SETTINGS || {};
+    function appendHeading(text, spaced = false) {
+      const heading = document.createElement('div');
+      heading.className = 'sec-head';
+      heading.textContent = text;
+      if (spaced) heading.style.marginTop = '10px';
+      body.appendChild(heading);
+    }
+    function octaveInput(title, value, change) {
+      const input = document.createElement('input');
+      input.type = 'number'; input.className = 'inp octave-inp';
+      input.min = '-3'; input.max = '3'; input.step = '1';
+      input.title = title; input.ariaLabel = title;
+      input.value = String(value ?? 0);
+      input.oninput = () => {
+        if (input.value === '') return;
+        const value = Number(input.value);
+        if (Number.isInteger(value) && value >= -3 && value <= 3) change(value);
+      };
+      input.onchange = () => {
+        const octave = Math.max(-3, Math.min(3, Math.round(Number(input.value) || 0)));
+        input.value = String(octave);
+        change(octave);
+      };
+      return input;
+    }
 
-    body.innerHTML += '<div class="sec-head">Instruments</div>';
+    const overallRow = document.createElement('div'); overallRow.className = 'row';
+    const overallLabel = document.createElement('label'); overallLabel.textContent = 'overall octave';
+    overallRow.appendChild(overallLabel);
+    overallRow.appendChild(octaveInput('Overall octave', S2.octave, octave => {
+      window.updateAudioSettings?.({ octave });
+    }));
+    body.appendChild(overallRow);
+
+    appendHeading('Instruments');
     const instTable = document.createElement('div');
     SYNTH_KEYS.forEach(([key, label]) => {
       const row = document.createElement('div'); row.className = 'inst-row';
       const lbl = document.createElement('div'); lbl.className = 'inst-key'; lbl.textContent = label;
       const sel = document.createElement('select'); sel.className = 'inp inst-sel';
-      sel.innerHTML = ['harp','bass','bell','flute','bit','pling','snare','kick','hat','off']
-        .map(n => `<option value="${n}"${S2.instruments?.[key]===n?' selected':''}>${n}</option>`).join('');
+      sel.innerHTML = INSTRUMENT_OPTIONS
+        .map(({ id: n }) => `<option value="${n}"${S2.instruments?.[key]===n?' selected':''}>${n}</option>`).join('');
       sel.onchange = () => {
         const patch = { instruments: {} }; patch.instruments[key] = sel.value;
         if (window.updateAudioSettings) window.updateAudioSettings(patch);
       };
       const prev = document.createElement('button'); prev.className = 'btn inst-prev'; prev.textContent = '▶';
-      prev.onclick = () => { if (window.previewInstrument) window.previewInstrument(sel.value); };
-      row.appendChild(lbl); row.appendChild(sel); row.appendChild(prev);
+      prev.title = `Preview ${label}`; prev.ariaLabel = `Preview ${label}`;
+      prev.onclick = () => { if (window.previewInstrument) window.previewInstrument(sel.value, key); };
+      const octave = octaveInput(`${label} octave`, S2.octaves?.[key], value => {
+        window.updateAudioSettings?.({ octaves: { [key]: value } });
+      });
+      row.appendChild(lbl); row.appendChild(sel); row.appendChild(octave); row.appendChild(prev);
       instTable.appendChild(row);
     });
     body.appendChild(instTable);
 
-    body.innerHTML += '<div class="sec-head" style="margin-top:10px">Scale · Note</div>';
+    appendHeading('Scale · Note', true);
 
     const scaleRow = document.createElement('div'); scaleRow.className = 'row';
     scaleRow.innerHTML = '<label>scale</label>';
@@ -766,7 +809,7 @@
     noteSel.onchange = () => { if (window.updateAudioSettings) window.updateAudioSettings({ noteMode: noteSel.value }); };
     noteRow.appendChild(noteSel); body.appendChild(noteRow);
 
-    body.innerHTML += '<div class="sec-head" style="margin-top:10px">Metronome</div>';
+    appendHeading('Metronome', true);
     const clickRow = document.createElement('div'); clickRow.className = 'row';
     clickRow.innerHTML = '<label>click track</label>';
     const clickBtn = document.createElement('button');
@@ -787,7 +830,7 @@
       <div class="sec-head">Event Simulator</div>
       <div class="row"><label>type</label>
         <select id="sim-type" class="inp">
-          <option>tool_call</option><option>tokens</option><option>words</option>
+          ${LIVE_PLAYPULSE_EVENTS.map(event => `<option>${event}</option>`).join('')}
         </select>
       </div>
       <div class="row"><label>harness</label>
@@ -851,7 +894,7 @@
   }
 
   // ── Built-in presets ──────────────────────────────────────────────────────────
-  // Three opinionated presets. Every event key is mapped; all 5 sonic axes covered.
+  // Built-in listening profiles.
   //
   // Design principles encoded:
   //   Cognitive Flow  — timbre=category, velocity=importance, path-hash=file identity
@@ -859,6 +902,45 @@
   //   Session Arc     — multi-scale: tools=micro, token-bursts=mid chord, words=macro melody
 
   const DAW_PRESETS = [
+    {
+      name: 'Calm Groove',
+      tag: 'Dorian · Warm harp · Gentle percussion',
+      desc: 'Warm harp, bass and low bells with shaker, tom and woodblock accents. Random Dorian notes.',
+      settings: {
+        scale: 'dorian', noteMode: 'random', octave: 0, clickTrack: false,
+        instruments: {
+          read:'hat', write:'bass', edit:'pling',
+          bash_git:'harp', bash_run:'harp', bash_other:'hat',
+          grep_glob:'snare', agent:'bell', other:'kick',
+          web:'bell', tokens:'snare', words:'hat',
+          turn_complete:'bell', input_required:'pling', thinking:'shaker',
+          human_turn:'bell', chirp:'tom', compact:'woodblock',
+          permission:'hat', mode_shift:'hat', attachment:'woodblock',
+          scaffold:'hat', tool_error:'buzz', api_error:'buzz', interrupt:'buzz',
+        },
+        octaves: {
+          read:-2, write:0, edit:-1,
+          bash_git:0, bash_run:1, bash_other:0,
+          grep_glob:0, agent:-1, other:0, web:0, tokens:0, words:0,
+          turn_complete:0, input_required:0, thinking:0, human_turn:-1,
+          chirp:0, compact:0, permission:0, mode_shift:0, attachment:0,
+          scaffold:0, tool_error:0, api_error:0, interrupt:-1,
+        },
+      },
+      mappings: [
+        { match: { key:'read' }, set: { volMult:1 } },
+        { match: { key:'write' }, set: { volMult:1 } },
+        { match: { key:'edit' }, set: { volMult:1 } },
+        { match: { key:'bash_git' }, set: { volMult:1 } },
+        { match: { key:'bash_run' }, set: { volMult:1 } },
+        { match: { key:'bash_other' }, set: { volMult:1 } },
+        { match: { key:'grep_glob' }, set: { volMult:1 } },
+        { match: { key:'agent' }, set: { volMult:1 } },
+        { match: { key:'other' }, set: { volMult:1 } },
+        { match: { key:'tokens' }, set: { volMult:1 } },
+        { match: { key:'words' }, set: { volMult:1 } },
+      ],
+    },
     {
       name: 'Cognitive Flow',
       tag:  'Pre-attentive · Identity · Sustainable',
@@ -960,8 +1042,18 @@
     },
   ];
 
+  // A preset is a full replace from the defaults, so the result never depends on
+  // the previous preset or on earlier Synth-tab edits.
   function applyPreset(preset) {
-    if (window.updateAudioSettings) window.updateAudioSettings(preset.settings);
+    if (window.updateAudioSettings) window.updateAudioSettings({
+      ...preset.settings,
+      instruments: { ...window.AUDIO_DEFAULTS?.instruments, ...preset.settings.instruments },
+      octave: preset.settings.octave ?? 0,
+      octaves: {
+        ...Object.fromEntries(Object.keys(window.AUDIO_SETTINGS?.octaves || {}).map(key => [key, 0])),
+        ...(preset.settings.octaves || {}),
+      },
+    });
     if (window.updateAudioProfile)  window.updateAudioProfile({ mappings: preset.mappings });
     // Sync header BPM display
     const bpmSlider = document.getElementById('daw-bpm');
@@ -1170,9 +1262,11 @@
     }
     try {
       const es = new EventSource('/events');
-      es.addEventListener('tool_call', e => { try { if (window.playPulse) window.playPulse('tool_call', JSON.parse(e.data)); } catch {} });
-      es.addEventListener('tokens',    e => { try { if (window.playPulse) window.playPulse('tokens',    JSON.parse(e.data)); } catch {} });
-      es.addEventListener('words',     e => { try { if (window.playPulse) window.playPulse('words',     JSON.parse(e.data)); } catch {} });
+      for (const event of LIVE_PLAYPULSE_EVENTS) {
+        es.addEventListener(event, e => {
+          try { window.playPulse?.(event, JSON.parse(e.data)); } catch {}
+        });
+      }
       es.onopen  = () => { if (statusEl) statusEl.textContent = 'LIVE /events'; };
       es.onerror = () => { if (statusEl) statusEl.textContent = 'reconnecting…'; };
     } catch { if (statusEl) statusEl.textContent = 'SSE failed — use SIM'; }
